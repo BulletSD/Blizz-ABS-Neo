@@ -1,0 +1,2985 @@
+#==============================================================================
+# ■ Blizz-ABS Custom Overlay with Full Animation Support
+#------------------------------------------------------------------------------
+# Система оверлей-анимаций для Blizz-ABS.
+# Поддержка всех состояний персонажей и врагов.
+#==============================================================================
+
+module ABS_CustomOverlay
+  
+  #============================================================================
+  # :: Основные настройки
+  #============================================================================
+  
+  # Источник графики: :picture (Graphics/Pictures) или :character (Graphics/Characters)
+  SOURCE = :picture
+
+  # Смещение оверлея относительно базового спрайта (в пикселях)
+  OFFSET_X = 4      # По оси X
+  OFFSET_Y = -62    # По оси Y (отрицательное = выше)
+  Z_PLUS   = 0      # Добавка к Z-слою (глубина отрисовки)
+
+  # Базовый размер одного кадра анимации (в пикселях)
+  FRAME_WIDTH  = 128
+  FRAME_HEIGHT = 128
+
+  # Базовая скорость анимации (используется, если не задана индивидуальная)
+  ANIMATION_SPEED = 4
+
+  #============================================================================
+  # :: Скорости анимаций
+  #----------------------------------------------------------------------------
+  # Больше значение = медленнее анимация. 1 = очень быстро, 10 = очень медленно.
+  #============================================================================
+  
+  ANIMATION_SPEEDS = {
+    :idle       => 5,   # Ожидание
+    :walk       => 4,   # Ходьба
+    :run        => 3,   # Бег
+    :dash       => 2,   # Рывок
+    :jump       => 1,   # Прыжок
+    :block      => 4,   # Блок в движении
+    :block_idle => 5,   # Блок стоя
+    :attack     => 1,   # Атака
+    :item       => 1,   # Использование предмета
+    :skill      => 2,   # Использование навыка
+    :custom     => 5,   # Пользовательские анимации
+    :appearance => 1,   # Появление
+    :death      => 2    # Смерть
+  }
+  
+  # Индивидуальные скорости для конкретных врагов (переопределяют ANIMATION_SPEEDS)
+  # Ключ = имя врага из базы данных (без пробелов).
+  ENEMY_ANIMATION_SPEEDS = {
+  "FierceWolf" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :block  => 3
+  },
+
+  "MushroomJaw" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :block  => 3
+  },
+  
+  "LavaBull" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :skill  => 1,
+    :attack => 1,
+    :block  => 3
+  },
+
+  "Witch" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :skill  => 2,
+    :block  => 3
+  },
+
+  "Bottle_carrier" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :skill  => 2,
+    :block  => 3
+  },
+
+  "Pirate" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :skill  => 2,
+    :block  => 3
+  },
+
+  "Bat" => {
+    :idle   => 2,
+    :death  => 3,
+    :walk   => 2,
+    :attack => 2,
+    :skill  => 2,
+    :block  => 2
+  },
+
+  "TentacledTyrant" => {
+    :idle   => 3,
+    :death  => 2,
+    :walk   => 3,
+    :attack => 1,
+    :skill  => 2,
+    :block  => 3
+  },
+
+  "GH_Girl" => {
+    :idle   => 1,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :block  => 3
+  },
+
+  "Goblin" => {
+    :idle   => 4,
+    :death  => 2,
+    :walk   => 4,
+    :attack => 1,
+    :block  => 3
+  }
+}
+
+  # Приоритет анимации смерти (максимальный приоритет)
+  DEATH_PRIORITY = 10
+  
+  #============================================================================
+  # :: Настройки отображения и зеркалирования
+  #============================================================================
+  
+  # Режим спрайтлиста: :single_strip (одна полоса) или :directional (4 направления)
+  STRIP_MODE = :single_strip
+  
+  # Скрывать оригинальный спрайт персонажа
+  HIDE_ORIGINAL_SPRITE = true
+
+  # Автозеркалирование для недостающих направлений
+  AUTO_MIRROR = true
+  DEFAULT_DIRECTION = 6       # Направление игрока по умолчанию (6 = вправо)
+  ENEMY_DEFAULT_DIRECTION = 4 # Направление врагов по умолчанию (4 = влево)
+  MIRROR_PAIRS = { 4 => 6, 6 => 4 } # Пары для зеркалирования
+
+  #============================================================================
+  # :: Детекция действий (Рывок, Прыжок, Блок, Атака)
+  #============================================================================
+  
+  # Рывок (Dash/Run)
+  DASH_DETECTION = :speed         # :speed, :button или :both
+  DASH_SPEED_THRESHOLD = 5        # Минимальная скорость для :speed
+  DASH_BUTTON = Input::Run        # Кнопка для :button
+
+  # Прыжок (Jump)
+  JUMP_DETECTION = :trigger       # :button, :trigger или :jumping
+  JUMP_BUTTON = Input::Jump
+  JUMP_PRIORITY = true            # Прерывает другие анимации
+  JUMP_LOOP = false
+
+  # Блок (Block/Defend)
+  BLOCK_DETECTION = :button       # :button, :trigger или :blocking
+  BLOCK_BUTTON = Input::Defend
+  BLOCK_PRIORITY = 2              # Приоритет (0-4)
+  BLOCK_LOOP = true
+  BLOCK_ALLOW_MOVEMENT = true
+
+  # Атака (Attack)
+  ATTACK_DETECTION = :trigger     # :button, :trigger или :attacking
+  ATTACK_BUTTON = Input::Attack
+  ATTACK_PRIORITY = 3
+  ATTACK_LOOP = false
+  ATTACK_ALLOW_MOVEMENT = true
+
+  #============================================================================
+  # :: Варианты атак, Предметы, Навыки и Кастомные анимации
+  #============================================================================
+  
+  # Случайные варианты атак (attack_0, attack_1...)
+  USE_RANDOM_ATTACKS = true
+  DEFAULT_ATTACK_VARIANTS = 3
+  ACTOR_ATTACK_VARIANTS = { 1 => 3, 2 => 2 }
+  ENEMY_ATTACK_VARIANTS = { 1 => 1, 2 => 1, 3 => 1 }
+
+  # Предметы (Items)
+  ITEM_PRIORITY = 3
+  ITEM_LOOP = false
+  ITEM_ALLOW_MOVEMENT = false
+  DEFAULT_ITEM_DURATION = 25
+  ITEM_ANIMATION_FRAMES = { 8 => 25, 9 => 27 }
+  ITEM_ANIMATION_SPEEDS = { 8 => 2, 9 => 2 }
+
+  # Навыки (Skills)
+  SKILL_PRIORITY = 3
+  SKILL_LOOP = false
+  SKILL_ALLOW_MOVEMENT = false
+  DEFAULT_SKILL_DURATION = 25
+  SKILL_ANIMATION_FRAMES = { 1 => 15, 2 => 15, 3 => 15, 4 => 40, 5 => 35, 6 => 40, 7 => 40 }
+  SKILL_ANIMATION_SPEEDS = { 1 => 3, 2 => 3, 3 => 3, 4 => 3, 5 => 3, 6 => 3, 7 => 3 }
+
+  # Пользовательские анимации (Custom)
+  CUSTOM_PRIORITY = 5
+  CUSTOM_LOOP = false
+  CUSTOM_ALLOW_MOVEMENT = false
+  CUSTOM_ANIMATION_SPEEDS = {
+    "takesB" => 5, "takesR" => 5, "takesY" => 5,
+    "sleeping" => 6, "sitting" => 5, "appearance" => 1
+  }
+
+  #============================================================================
+  # :: Определение размеров кадра
+  #============================================================================
+
+  # Автоопределение размера по паттерну в имени файла (например, _64x64)
+  def self.detect_frame_size(filename)
+    return [FRAME_WIDTH, FRAME_HEIGHT] if filename.nil? || filename.to_s.empty?
+    
+    if filename.to_s =~ /_(\d+)x(\d+)$/i
+      w, h = $1.to_i, $2.to_i
+      return [w, h] if w > 0 && h > 0
+    end
+    
+    [FRAME_WIDTH, FRAME_HEIGHT]
+  end
+  
+  # Получение базового размера кадра для персонажа
+  def self.get_frame_size(character, config = nil)
+    config ||= (character.abs_sprite_config if character.respond_to?(:abs_sprite_config))
+    
+    if config
+      # Приоритет 1: Явно заданные размеры
+      w, h = config[:frame_width].to_i, config[:frame_height].to_i
+      return [w, h] if w > 0 && h > 0
+      
+      # Приоритет 2: Автоопределение по имени файла (idle/walk)
+      key = config[:idle] || config[:walk]
+      if key && !key.to_s.empty?
+        detected = detect_frame_size(key)
+        return detected if detected[0] != FRAME_WIDTH || detected[1] != FRAME_HEIGHT
+      end
+    end
+    
+    [FRAME_WIDTH, FRAME_HEIGHT]
+  end
+  
+  # Получение размера кадра для конкретного ключа анимации
+  def self.get_frame_size_for_key(character, key, config = nil)
+    config ||= (character.abs_sprite_config if character.respond_to?(:abs_sprite_config))
+
+    # Приоритет 1: Паттерн в имени ключа (поддерживает суффиксы типа _400x299_a)
+    if key && !key.to_s.empty? && key.to_s =~ /_(\d+)x(\d+)(?:_[a-zA-Z0-9]+)?$/i
+      w, h = $1.to_i, $2.to_i
+      return [w, h] if w > 0 && h > 0
+    end
+
+    # Приоритет 2: Явные размеры из конфига
+    if config
+      w, h = config[:frame_width].to_i, config[:frame_height].to_i
+      return [w, h] if w > 0 && h > 0
+    end
+
+    [FRAME_WIDTH, FRAME_HEIGHT]
+  end
+
+  #============================================================================
+  # :: Вспомогательные методы
+  #============================================================================
+
+  # Безопасная загрузка битмапа (возвращает nil при отсутствии файла)
+  def self.bitmap(key)
+    return nil if key.nil? || key.to_s.empty?
+    begin
+      case SOURCE
+      when :character
+        RPG::Cache.character(key.to_s, 0)
+      else
+        RPG::Cache.picture(key.to_s)
+      end
+    rescue
+      nil
+    end
+  end
+
+  # Генерация ключа для сегмента цепочки (base_a, base_b...)
+  def self.chain_key(base_key, segment_index)
+    return base_key if base_key.nil? || base_key.to_s.empty?
+    idx = [segment_index.to_i, 0].max
+    "#{base_key}_#{(97 + idx).chr}"
+  end
+
+  # Проверка наличия цепочки сегментов
+  def self.chain_available?(base_key)
+    bitmap(chain_key(base_key, 0)) != nil
+  end
+
+  # Подсчет общего количества кадров для файла или цепочки
+  def self.total_frames_for_key(character, base_key, config = nil)
+    return 1 if base_key.nil? || base_key.to_s.empty?
+    config ||= (character.abs_sprite_config if character.respond_to?(:abs_sprite_config))
+
+    total = 0
+    if chain_available?(base_key)
+      segment = 0
+      loop do
+        k = chain_key(base_key, segment)
+        bmp = bitmap(k)
+        break if bmp.nil?
+        
+        fw, = get_frame_size_for_key(character, k, config)
+        fw = 1 if fw < 1
+        total += [bmp.width / fw, 1].max
+        segment += 1
+      end
+    else
+      bmp = bitmap(base_key)
+      return 1 if bmp.nil?
+      
+      fw, = get_frame_size_for_key(character, base_key, config)
+      fw = 1 if fw < 1
+      total = [bmp.width / fw, 1].max
+    end
+    
+    total
+  end
+
+  # Получение скорости анимации с учетом типа и ID
+  def self.get_animation_speed(animation_type, id = nil)
+    case animation_type
+    when :item
+      return ITEM_ANIMATION_SPEEDS[id] if id && ITEM_ANIMATION_SPEEDS[id]
+    when :skill
+      return SKILL_ANIMATION_SPEEDS[id] if id && SKILL_ANIMATION_SPEEDS[id]
+    when :custom
+      return CUSTOM_ANIMATION_SPEEDS[id] if id && CUSTOM_ANIMATION_SPEEDS[id]
+    end
+    
+    ANIMATION_SPEEDS[animation_type] || ANIMATION_SPEED
+  end
+
+  # Получение количества вариантов атак для персонажа
+  def self.get_attack_variants(character)
+    return 1 unless USE_RANDOM_ATTACKS
+    
+    if character.is_a?(Game_Player)
+      actor_id = 1
+      begin
+        actor_id = $game_party.actors[0].id if $game_party && $game_party.actors[0]
+      rescue
+        actor_id = 1
+      end
+      return ACTOR_ATTACK_VARIANTS[actor_id] || DEFAULT_ATTACK_VARIANTS
+    end
+    
+    DEFAULT_ATTACK_VARIANTS
+  end
+
+  # Выбор корректного ключа атаки с безопасным fallback
+  def self.resolve_attack_key(base_key, character)
+    return base_key if base_key.nil? || base_key.to_s.empty? || !USE_RANDOM_ATTACKS
+
+    variants = [get_attack_variants(character).to_i, 1].max
+    return base_key if variants <= 1
+
+    # Безопасное получение индекса варианта
+    variant_index = 0
+    if character.respond_to?(:abs_current_attack_variant)
+      variant_index = character.abs_current_attack_variant.to_i
+    end
+    variant_index = variant_index % variants
+
+    candidate = "#{base_key}_#{variant_index}"
+    return candidate if bitmap(candidate)
+    return base_key if bitmap(base_key)
+
+    # Fallback: поиск первого доступного варианта
+    variants.times do |i|
+      k = "#{base_key}_#{i}"
+      return k if bitmap(k)
+    end
+
+    base_key
+  end
+
+  # Расчет длительности анимации предмета (в тиках)
+  def self.get_item_duration(item_id)
+    frames = ITEM_ANIMATION_FRAMES[item_id] || DEFAULT_ITEM_DURATION
+    speed = get_animation_speed(:item, item_id)
+    speed = 1 if speed.nil? || speed < 1
+    frames * speed
+  end
+
+  # Расчет длительности анимации навыка (в тиках)
+  def self.get_skill_duration(skill_id)
+    frames = SKILL_ANIMATION_FRAMES[skill_id] || DEFAULT_SKILL_DURATION
+    speed = get_animation_speed(:skill, skill_id)
+    speed = 1 if speed.nil? || speed < 1
+    frames * speed
+  end
+
+end # module ABS_CustomOverlay
+
+#==============================================================================
+# ■ Game_Character - Расширение для системы оверлеев
+#------------------------------------------------------------------------------
+# Добавление атрибутов и методов для управления анимациями Blizz-ABS.
+# Совместимо с RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+class Game_Character
+
+  #============================================================================
+  # :: Атрибуты (геттеры и сеттеры)
+  #============================================================================
+  
+  # Конфигурация спрайтов и анимаций
+  attr_accessor :abs_sprite_config
+  
+  # Переопределяем геттер для ленивой инициализации (Железобетонная защита от nil)
+def abs_sprite_config
+  @abs_sprite_config ||= {}
+end
+  
+  # Состояния персонажа
+  attr_accessor :abs_jumping, :abs_blocking, :abs_attacking
+  
+  # Направление и варианты атак
+  attr_accessor :abs_last_horizontal_direction, :abs_current_attack_variant
+  
+  # Предметы и навыки
+  attr_accessor :abs_using_item, :abs_current_item_id
+  attr_accessor :abs_using_skill, :abs_current_skill_id
+  
+  # Пользовательские анимации
+  attr_accessor :abs_custom_animation, :abs_custom_animation_duration
+  attr_accessor :abs_custom_animation_loop, :abs_custom_animation_movement
+  attr_accessor :abs_custom_timer_char
+  
+  # Кэши и очереди (только чтение через геттеры)
+  attr_reader :abs_sprite_timers, :abs_cooldowns, :abs_animation_cache
+  attr_reader :abs_damage_cache, :abs_state_cache, :abs_active_effects
+  attr_reader :abs_projectiles, :abs_animation_queue, :abs_damage_queue
+
+  #============================================================================
+  # :: Инициализация атрибутов
+  #============================================================================
+  
+  # Инициализация всех ABS-атрибутов значениями по умолчанию
+  # Вызывается при первом обращении к персонажу
+  def abs_init_defaults
+    # Конфигурация
+    @abs_sprite_config ||= {}
+    
+    # Состояния
+    @abs_jumping ||= false
+    @abs_blocking ||= false
+    @abs_attacking ||= false
+    
+    # Направление и атаки
+    @abs_last_horizontal_direction ||= 6
+    @abs_current_attack_variant ||= 0
+    
+    # Предметы
+    @abs_using_item ||= false
+    @abs_current_item_id ||= 0
+    
+    # Навыки
+    @abs_using_skill ||= false
+    @abs_current_skill_id ||= 0
+    
+    # Пользовательские анимации
+    @abs_custom_animation ||= ""
+    @abs_custom_animation_duration ||= 0
+    @abs_custom_animation_loop ||= false
+    @abs_custom_animation_movement ||= false
+    @abs_custom_timer_char ||= 0
+    
+    # Кэши и очереди
+    @abs_sprite_timers ||= {}
+    @abs_cooldowns ||= {}
+    @abs_animation_cache ||= {}
+    @abs_damage_cache ||= {}
+    @abs_state_cache ||= {}
+    @abs_active_effects ||= []
+    @abs_projectiles ||= []
+    @abs_animation_queue ||= []
+    @abs_damage_queue ||= []
+  end
+
+  #============================================================================
+  # :: Управление пользовательскими анимациями
+  #============================================================================
+  
+  # Запуск пользовательской анимации
+  # animation_name - имя файла анимации
+  # duration - длительность в кадрах (по умолчанию 60)
+  # anim_loop - зацикливать? (nil = использовать настройку по умолчанию)
+  # allow_movement - разрешить движение? (nil = использовать настройку по умолчанию)
+  def play_custom_animation(animation_name, duration = 60, anim_loop = nil, allow_movement = nil)
+    # Получаем настройки по умолчанию из модуля (если доступен)
+    loop_default = false
+    movement_default = false
+    
+    if defined?(ABS_CustomOverlay)
+      loop_default = ABS_CustomOverlay::CUSTOM_LOOP
+      movement_default = ABS_CustomOverlay::CUSTOM_ALLOW_MOVEMENT
+    end
+    
+    @abs_custom_animation = animation_name
+    @abs_custom_animation_duration = duration
+    @abs_custom_animation_loop = anim_loop.nil? ? loop_default : anim_loop
+    @abs_custom_animation_movement = allow_movement.nil? ? movement_default : allow_movement
+  end
+
+  # Остановка пользовательской анимации
+  def stop_custom_animation
+    @abs_custom_animation = ""
+    @abs_custom_animation_duration = 0
+    @abs_custom_timer_char = 0
+  end
+
+  # Проверка: воспроизводится ли пользовательская анимация?
+  def custom_animation_playing?
+    @abs_custom_animation.to_s != ""
+  end
+
+  #============================================================================
+  # :: Геттеры для кэшей (ленивая инициализация)
+  #============================================================================
+  
+  def abs_sprite_timers
+    @abs_sprite_timers ||= {}
+  end
+
+  def abs_cooldowns
+    @abs_cooldowns ||= {}
+  end
+
+  def abs_animation_cache
+    @abs_animation_cache ||= {}
+  end
+
+  def abs_damage_cache
+    @abs_damage_cache ||= {}
+  end
+
+  def abs_state_cache
+    @abs_state_cache ||= {}
+  end
+
+  def abs_active_effects
+    @abs_active_effects ||= []
+  end
+
+  def abs_projectiles
+    @abs_projectiles ||= []
+  end
+
+  def abs_animation_queue
+    @abs_animation_queue ||= []
+  end
+
+  def abs_damage_queue
+    @abs_damage_queue ||= []
+  end
+
+  #============================================================================
+  # :: Вспомогательные методы
+  #============================================================================
+  
+  # Кэшированный ключ анимации смерти
+  def abs_death_key_cached
+    @abs_death_key_cached ||= ""
+  end
+
+end # class Game_Character
+
+#==============================================================================
+# ■ ABS_OverlayFlags - Безопасная установка флагов состояний
+#------------------------------------------------------------------------------
+# Модуль для безопасной установки флагов использования предметов и навыков.
+# Проверяет наличие методов перед вызовом для предотвращения ошибок.
+#==============================================================================
+
+module ABS_OverlayFlags
+
+  #============================================================================
+  # :: Установка флага использования предмета
+  #============================================================================
+  
+  # Устанавливает флаг использования предмета для персонажа
+  # user - объект персонажа (Game_Character или наследник)
+  # item_id - ID предмета из базы данных
+  def self.set_item(user, item_id)
+    return if user.nil? || item_id.to_i <= 0
+    
+    if user.respond_to?(:abs_using_item=) && user.respond_to?(:abs_current_item_id=)
+      user.abs_using_item = true
+      user.abs_current_item_id = item_id
+    end
+  end
+
+  #============================================================================
+  # :: Установка флага использования навыка
+  #============================================================================
+  
+  # Устанавливает флаг использования навыка для персонажа
+  # user - объект персонажа (Game_Character или наследник)
+  # skill_id - ID навыка из базы данных
+  def self.set_skill(user, skill_id)
+    return if user.nil? || skill_id.to_i <= 0
+    
+    if user.respond_to?(:abs_using_skill=) && user.respond_to?(:abs_current_skill_id=)
+      user.abs_using_skill = true
+      user.abs_current_skill_id = skill_id
+    end
+  end
+
+end # module ABS_OverlayFlags
+
+#==============================================================================
+# ■ Часть 3. Перехватчики методов для Blizz-ABS
+#------------------------------------------------------------------------------
+# Хуки для интеграции системы оверлеев с Blizz-ABS.
+# Перехватывают использование навыков и комбо-атаки врагов.
+#==============================================================================
+
+if defined?(Map_Enemy)
+  class Map_Enemy
+
+    #==========================================================================
+    # :: Перехват метода use_skill
+    #--------------------------------------------------------------------------
+    # Отслеживает использование навыков врагами для запуска анимаций.
+    #==========================================================================
+    
+    if method_defined?(:use_skill) && !method_defined?(:abs_overlay_use_skill_original)
+      alias abs_overlay_use_skill_original use_skill
+
+      def use_skill(*args)
+        skill_arg = args[0]
+        skill_id = 0
+
+        # Определяем ID навыка из аргумента
+        if skill_arg.is_a?(RPG::Skill)
+          skill_id = skill_arg.id
+        elsif skill_arg.is_a?(Integer)
+          skill_id = skill_arg
+        end
+
+        # Вызываем оригинальный метод
+        result = abs_overlay_use_skill_original(*args)
+
+        # Устанавливаем флаг если навык успешно использован
+        if result != false && skill_id > 0
+          ABS_OverlayFlags.set_skill(self, skill_id)
+        end
+
+        result
+      end
+    end
+
+    #==========================================================================
+    # :: Перехват метода update (отслеживание комбо-навыков)
+    #--------------------------------------------------------------------------
+    # Отслеживает выполнение комбо-атак для запуска соответствующих анимаций.
+    #==========================================================================
+    
+    if method_defined?(:update) && defined?(COMSkill) && !method_defined?(:abs_overlay_enemy_update_original)
+      alias abs_overlay_enemy_update_original update
+
+      def update
+        # Безопасно получаем объект комбо
+        combo_obj = nil
+        begin
+          combo_obj = combo if respond_to?(:combo)
+        rescue
+          combo_obj = nil
+        end
+
+        # Обрабатываем комбо-команды
+        if combo_obj
+          begin
+            action_id = combo_obj.aid rescue nil
+            commands = combo_obj.commands rescue nil
+
+            if commands && action_id
+              current_step = commands[action_id] rescue nil
+
+              if current_step && current_step.respond_to?(:each)
+                current_step.each do |command|
+                  next unless command.respond_to?(:[])
+
+                  # Проверяем, является ли команда навыком
+                  if command[0] == COMSkill
+                    skill_id = command[1].to_i
+
+                    if skill_id > 0
+                      # Проверяем, не установлен ли уже этот навык
+                      skill_active = respond_to?(:abs_using_skill) && abs_using_skill
+                      skill_match = respond_to?(:abs_current_skill_id) && abs_current_skill_id == skill_id
+
+                      # Устанавливаем флаг если навык еще не активен
+                      ABS_OverlayFlags.set_skill(self, skill_id) unless (skill_active && skill_match)
+                    end
+
+                    break # Обрабатываем только первый найденный навык
+                  end
+                end
+              end
+            end
+          rescue StandardError
+            # Игнорируем ошибки обработки комбо, но не системные исключения
+          end
+        end
+
+        # Вызываем оригинальный update
+        abs_overlay_enemy_update_original
+      end
+    end
+
+  end
+end # if defined?(Map_Enemy)
+
+#==============================================================================
+# ■ Перехват метода hotkey_execute для BlizzABS
+#------------------------------------------------------------------------------
+# Отслеживает использование хоткеев для запуска анимаций предметов и навыков.
+# Совместимость: Ruby 1.8.1 / RGSS (RPG Maker XP)
+#==============================================================================
+
+if defined?(BlizzABS) && defined?(Game_System)
+
+  class Game_System
+
+    #==========================================================================
+    # :: Перехват метода hotkey_execute
+    #--------------------------------------------------------------------------
+    # Перехватывает выполнение хоткеев для установки флагов использования
+    # предметов и навыков игроком.
+    #==========================================================================
+    
+    if method_defined?('hotkey_execute') && !method_defined?('abs_overlay_hotkey_execute_original')
+      alias abs_overlay_hotkey_execute_original hotkey_execute
+
+      def hotkey_execute(index)
+        begin
+          # Получаем хоткей по индексу
+          hotkey = @hotkeys[index] rescue nil
+
+          if hotkey.is_a?(Array)
+            type = hotkey[0]
+            id = hotkey[1].to_i
+
+            # Проверяем валидность данных
+            item_valid = ($data_items[id] != nil rescue false)
+            skill_valid = ($data_skills[id] != nil rescue false)
+
+            # Определяем тип и устанавливаем соответствующий флаг
+            if type == 1 && item_valid
+              # Тип 1 - предмет
+              ABS_OverlayFlags.set_item($game_player, id)
+              
+            elsif (type == 0 || type == 2) && skill_valid
+              # Тип 0 или 2 - навык
+              ABS_OverlayFlags.set_skill($game_player, id)
+              
+            else
+              # Неизвестный тип - определяем по наличию данных (приоритет: навык)
+              if skill_valid
+                ABS_OverlayFlags.set_skill($game_player, id)
+              elsif item_valid
+                ABS_OverlayFlags.set_item($game_player, id)
+              end
+            end
+          end
+
+        rescue Exception => e
+          # Логируем ошибки для отладки
+          p "[ABS_Overlay] hotkey_execute error: #{e.message}"
+        end
+
+        # Вызываем оригинальный метод
+        abs_overlay_hotkey_execute_original(index)
+      end
+
+    end
+
+  end # class Game_System
+
+end # if defined?(BlizzABS)
+
+#==============================================================================
+# ■ Control_Sprite_Character - Рендеринг оверлей-анимаций
+#------------------------------------------------------------------------------
+# Расширение класса спрайта персонажа для отрисовки дополнительных анимаций.
+# Совместимо с RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+if defined?(Control_Sprite_Character)
+  class Control_Sprite_Character
+
+    #==========================================================================
+    # :: Перехват базовых методов (update, dispose)
+    #==========================================================================
+    
+    if !method_defined?(:abs_overlay_update_blizzabs_later)
+      alias abs_overlay_update_blizzabs_later update
+    end
+    
+    def update
+      abs_overlay_update_blizzabs_later
+      abs_overlay_update
+      abs_overlay_hide_original
+    end
+
+    if !method_defined?(:abs_overlay_dispose_blizzabs_later)
+      alias abs_overlay_dispose_blizzabs_later dispose
+    end
+    
+    def dispose
+      abs_overlay_dispose_overlay
+      abs_overlay_dispose_blizzabs_later
+    end
+    #==========================================================================
+    # :: Определение ключа состояния (abs_fetch_state_key)
+    #--------------------------------------------------------------------------
+    # Возвращает [key, use_mirror] для заданного состояния и направления.
+    #==========================================================================
+    
+    def abs_fetch_state_key(state_sym, direction, sprite_direction, config)
+      key = nil
+      use_mirror = false
+
+      default_dir  = config[:default_direction] || ABS_CustomOverlay::DEFAULT_DIRECTION
+      mirror_pairs = config[:mirror_pairs]       || ABS_CustomOverlay::MIRROR_PAIRS
+
+      # 1. Попытка получить ключ для текущего направления
+      case direction
+      when 2 then key = config[:"#{state_sym}_down"]
+      when 4 then key = config[:"#{state_sym}_left"]
+      when 6 then key = config[:"#{state_sym}_right"]
+      when 8 then key = config[:"#{state_sym}_up"]
+      end
+
+      # 2. Фоллбек на базовый ключ (без направления)
+      if (key.nil? || key == '') && config[state_sym]
+        key = config[state_sym]
+        if ABS_CustomOverlay::AUTO_MIRROR
+          mirror_dir = mirror_pairs[sprite_direction]
+          use_mirror = (mirror_dir == default_dir)
+        end
+      end
+
+      # 3. Попытка зеркалирования для недостающих направлений
+      if (key.nil? || key == '') && ABS_CustomOverlay::AUTO_MIRROR
+        mirror_dir = mirror_pairs[direction]
+        if mirror_dir
+          case mirror_dir
+          when 2 then key = config[:"#{state_sym}_down"]
+          when 4 then key = config[:"#{state_sym}_left"]
+          when 6 then key = config[:"#{state_sym}_right"]
+          when 8 then key = config[:"#{state_sym}_up"]
+          end
+          use_mirror = true if key && key != ''
+        end
+      end
+
+      # 4. Фоллбек для специфичных навыков/предметов на базовые анимации
+      if (key.nil? || key == '')
+        name = state_sym.to_s
+        if name =~ /^skill\d+$/ && config[:skill] && config[:skill] != ''
+          key = config[:skill]
+          if ABS_CustomOverlay::AUTO_MIRROR
+            mirror_dir = mirror_pairs[sprite_direction]
+            use_mirror = (mirror_dir == default_dir) if mirror_dir
+          end
+        elsif name =~ /^item\d+$/ && config[:item] && config[:item] != ''
+          key = config[:item]
+          if ABS_CustomOverlay::AUTO_MIRROR
+            mirror_dir = mirror_pairs[sprite_direction]
+            use_mirror = (mirror_dir == default_dir) if mirror_dir
+          end
+        end
+      end
+
+      [key, use_mirror]
+    end
+
+    #==========================================================================
+    # :: Главное обновление оверлея (abs_overlay_update)
+    #==========================================================================
+    
+    def abs_overlay_update
+      base = @sprite
+      
+      # Проверка базового спрайта
+      if base.nil? || base.disposed?
+        abs_overlay_dispose_overlay
+        return
+      end
+
+      # Проверка на труп (окончание анимации смерти)
+      if @character.character_name.to_s =~ /_crp$/i
+        cfg = @character.abs_sprite_config rescue nil
+        unless (cfg && cfg[:death] && !@abs_death_animation_complete)
+          abs_overlay_dispose_overlay
+          return
+        end
+      end
+
+      return unless @character
+
+      config = @character.abs_sprite_config
+      if config.nil? || config.empty?
+        abs_overlay_dispose_overlay
+        return
+      end
+
+      # ── Определение движения ──────────────────────────────────────────────
+      real_dx = 0
+      real_dx = @character.real_x - @abs_last_real_x if @abs_last_real_x
+
+      is_moving = @character.respond_to?(:moving?) ? @character.moving? : false
+      if !is_moving && @character.respond_to?(:real_x)
+        if real_dx != 0 || (@character.real_y != (@abs_last_real_y || @character.real_y))
+          is_moving = true
+        end
+      end
+
+      @abs_last_real_x = @character.real_x
+      @abs_last_real_y = @character.real_y
+
+      # ── Состояние смерти ──────────────────────────────────────────────────
+      is_dying = (@abs_death_started && !@abs_death_animation_complete)
+
+      if @character.respond_to?(:battler)
+        b = @character.battler rescue nil
+        if b && b.respond_to?(:hp) && b.hp <= 0
+          cname = @character.character_name.to_s
+          if @abs_death_animation_complete
+            is_dying = false
+          elsif @abs_death_started
+            is_dying = true
+          else
+            is_dying = true
+            @abs_death_frame_reset = true
+            @abs_death_started = true
+            @abs_death_original_name = (cname =~ /_crp$/ ? nil : cname)
+            @abs_death_key_cached = config[:death]
+          end
+        end
+      end
+
+      # ── Рывок (Dash) ──────────────────────────────────────────────────────
+      is_dashing = false
+      if is_moving
+        case ABS_CustomOverlay::DASH_DETECTION
+        when :speed
+          speed = @character.move_speed rescue 4
+          is_dashing = (speed >= ABS_CustomOverlay::DASH_SPEED_THRESHOLD)
+        when :button
+          is_dashing = Input.press?(ABS_CustomOverlay::DASH_BUTTON) if @character.is_a?(Game_Player)
+        when :both
+          speed = @character.move_speed rescue 4
+          speed_check = (speed >= ABS_CustomOverlay::DASH_SPEED_THRESHOLD)
+          button_check = (@character.is_a?(Game_Player) && Input.press?(ABS_CustomOverlay::DASH_BUTTON))
+          is_dashing = (speed_check && button_check)
+        end
+      end
+
+      # ── Прыжок (Jump) ─────────────────────────────────────────────────────
+      is_jumping = false
+      case ABS_CustomOverlay::JUMP_DETECTION
+      when :button
+        is_jumping = Input.press?(ABS_CustomOverlay::JUMP_BUTTON) if @character.is_a?(Game_Player)
+      when :trigger
+        if @character.is_a?(Game_Player)
+          if Input.trigger?(ABS_CustomOverlay::JUMP_BUTTON)
+            @abs_jump_active = true
+            @abs_jump_frame_reset = true
+          end
+          if @abs_jump_active && !ABS_CustomOverlay::JUMP_LOOP
+            if @abs_overlay_total_frames && @abs_overlay_total_frames > 0
+              @abs_jump_active = false if @abs_overlay_current_frame >= (@abs_overlay_total_frames - 1)
+            end
+          end
+          is_jumping = !!@abs_jump_active
+        end
+      when :jumping
+        if @character.respond_to?(:jumping)
+          is_jumping = @character.jumping
+        elsif @character.respond_to?(:abs_jumping)
+          is_jumping = @character.abs_jumping
+        end
+      end
+
+      # ── Блок (Block) ──────────────────────────────────────────────────────
+      is_blocking = false
+      if @character.is_a?(Game_Player)
+        case ABS_CustomOverlay::BLOCK_DETECTION
+        when :button
+          is_blocking = Input.press?(ABS_CustomOverlay::BLOCK_BUTTON)
+        when :trigger
+          if Input.trigger?(ABS_CustomOverlay::BLOCK_BUTTON)
+            @abs_block_active = true
+            @abs_block_frame_reset = true
+          end
+          if @abs_block_active && !ABS_CustomOverlay::BLOCK_LOOP
+            if @abs_overlay_total_frames && @abs_overlay_total_frames > 0
+              @abs_block_active = false if @abs_overlay_current_frame >= (@abs_overlay_total_frames - 1)
+            end
+          end
+          is_blocking = !!@abs_block_active
+        when :blocking
+          is_blocking = @character.respond_to?(:blocking) ? @character.blocking : @character.abs_blocking rescue false
+        end
+      else
+        if @character.respond_to?(:defending) && @character.defending
+          is_blocking = true
+        elsif @character.respond_to?(:in_action) && @character.in_action > 0
+          if @character.respond_to?(:last_action) && @character.last_action.is_a?(Array)
+            if @character.last_action[0] == "defend"
+              is_blocking = true
+              penalty = @character.respond_to?(:defend_penalty) ? @character.defend_penalty : 0
+              @abs_block_frame_reset = true if @character.in_action == penalty
+            end
+          end
+        end
+      end
+      is_blocking = false if is_blocking && !ABS_CustomOverlay::BLOCK_ALLOW_MOVEMENT && is_moving
+
+      # ── Атака (Attack) ────────────────────────────────────────────────────
+      is_attacking = false
+      if @character.is_a?(Game_Player)
+        case ABS_CustomOverlay::ATTACK_DETECTION
+        when :button
+          is_attacking = Input.press?(ABS_CustomOverlay::ATTACK_BUTTON)
+        when :trigger
+          @abs_attack_timer ||= 0
+          @abs_attack_timer -= 1 if @abs_attack_timer > 0
+          if Input.trigger?(ABS_CustomOverlay::ATTACK_BUTTON) && @abs_attack_timer <= 0
+            @abs_attack_frame_reset = true
+            if ABS_CustomOverlay::USE_RANDOM_ATTACKS
+              variants = ABS_CustomOverlay.get_attack_variants(@character)
+              @character.abs_current_attack_variant = rand(variants)
+            else
+              @character.abs_current_attack_variant = 0
+            end
+            attack_speed = ABS_CustomOverlay.get_animation_speed(:attack)
+            @abs_attack_timer = 16 * attack_speed
+          end
+          is_attacking = (@abs_attack_timer > 0)
+        when :attacking
+          is_attacking = (@character.respond_to?(:attacking) && @character.attacking)
+        end
+      else
+        if @character.respond_to?(:in_action) && @character.in_action > 0
+          if @character.respond_to?(:last_action) && @character.last_action.is_a?(Array)
+            if @character.last_action[0] == "attack"
+              is_attacking = true
+              penalty = @character.respond_to?(:attack_penalty) ? @character.attack_penalty : 0
+              if @character.in_action == penalty
+                @abs_attack_frame_reset = true
+                if ABS_CustomOverlay::USE_RANDOM_ATTACKS
+                  variants = ABS_CustomOverlay.get_attack_variants(@character)
+                  @character.abs_current_attack_variant = rand(variants)
+                end
+              end
+            end
+          end
+        end
+      end
+      is_attacking = false if is_attacking && !ABS_CustomOverlay::ATTACK_ALLOW_MOVEMENT && is_moving
+
+      # ── Использование предмета ────────────────────────────────────────────
+      is_using_item = false
+      current_item_id = 0
+      if @character.abs_using_item
+        @abs_item_timer ||= 0
+        if @abs_item_timer <= 0
+          current_item_id = @character.abs_current_item_id
+          @abs_item_frame_reset = true
+          @abs_item_timer = ABS_CustomOverlay.get_item_duration(current_item_id)
+        end
+        if @abs_item_timer > 0
+          @abs_item_timer -= 1
+          is_using_item = true
+          current_item_id = @character.abs_current_item_id
+          if @abs_item_timer <= 0
+            @character.abs_using_item = false
+            @character.abs_current_item_id = 0
+          end
+        end
+      end
+      is_using_item = false if is_using_item && !ABS_CustomOverlay::ITEM_ALLOW_MOVEMENT && is_moving
+
+      # ── Использование навыка ──────────────────────────────────────────────
+      is_using_skill = false
+      current_skill_id = 0
+      if @character.abs_using_skill
+        @abs_skill_timer ||= 0
+        if @abs_skill_timer <= 0
+          current_skill_id = @character.abs_current_skill_id
+          @abs_skill_frame_reset = true
+          @abs_skill_timer = ABS_CustomOverlay.get_skill_duration(current_skill_id)
+        end
+        if @abs_skill_timer > 0
+          @abs_skill_timer -= 1
+          is_using_skill = true
+          current_skill_id = @character.abs_current_skill_id
+          if @abs_skill_timer <= 0
+            @character.abs_using_skill = false
+            @character.abs_current_skill_id = 0
+          end
+        end
+      end
+      is_using_skill = false if is_using_skill && !ABS_CustomOverlay::SKILL_ALLOW_MOVEMENT && is_moving
+
+      # ── Пользовательская анимация ─────────────────────────────────────────
+      is_custom_animation = false
+      current_custom_name = nil
+      if @character.custom_animation_playing?
+        @character.abs_custom_timer_char ||= 0
+        if @character.abs_custom_timer_char <= 0
+          current_custom_name = @character.abs_custom_animation
+          @abs_custom_frame_reset = true
+          dur = @character.abs_custom_animation_duration rescue nil
+          @character.abs_custom_timer_char = (dur && dur > 0) ? dur : 1
+        end
+        if @character.abs_custom_timer_char > 0
+          @character.abs_custom_timer_char -= 1
+          is_custom_animation = true
+          current_custom_name = @character.abs_custom_animation
+          if @character.abs_custom_timer_char <= 0 && !@character.abs_custom_animation_loop
+            @character.stop_custom_animation
+            @character.instance_variable_set(:@abs_appearance_playing, false)
+          end
+        end
+      else
+        @character.abs_custom_timer_char = 0
+      end
+      is_custom_animation = false if is_custom_animation && !@character.abs_custom_animation_movement && is_moving
+
+      # ── Направление ───────────────────────────────────────────────────────
+      direction = @character.direction rescue 6
+      if is_moving
+        direction = 6 if real_dx > 0
+        direction = 4 if real_dx < 0
+      end
+      if is_attacking && @character.is_a?(Map_Enemy) && $game_player
+        p_x, e_x = $game_player.real_x, @character.real_x
+        direction = (p_x > e_x) ? 6 : ((p_x < e_x) ? 4 : direction)
+      end
+
+      @character.abs_last_horizontal_direction = direction if (direction == 4 || direction == 6)
+      
+      sprite_direction = direction
+      sprite_direction = @character.abs_last_horizontal_direction if (direction == 2 || direction == 8)
+
+      # ── Приоритеты анимаций ───────────────────────────────────────────────
+      key = nil
+      animation_type = nil
+      use_mirror = false
+      force_no_loop = false
+
+      @abs_locked_action_key ||= nil
+      @abs_locked_action_type ||= nil
+
+      # Вспомогательная лямбда для выбора действия
+      pick_action = lambda do |base_sym, type_sym, loop_flag|
+        k, m = abs_fetch_state_key(base_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k
+          use_mirror = m
+          animation_type = type_sym
+          force_no_loop = !loop_flag
+          true
+        else
+          false
+        end
+      end
+
+      # Смерть (наивысший приоритет)
+      if is_dying
+        k, m = abs_fetch_state_key(:death, direction, sprite_direction, config)
+        if k && k != ''
+          @abs_locked_action_key = nil
+          @abs_locked_action_type = nil
+          key = k
+          use_mirror = m
+          animation_type = :death
+          force_no_loop = true
+        else
+          @abs_death_animation_complete = true
+        end
+      end
+
+      # Приоритет 5
+      if (key.nil? || key == '') && is_custom_animation && ABS_CustomOverlay::CUSTOM_PRIORITY >= 5
+        k, m = abs_fetch_state_key(current_custom_name.to_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :custom
+          force_no_loop = !(@character.abs_custom_animation_loop rescue false)
+        end
+      end
+
+      # Приоритет 4
+      if (key.nil? || key == '') && is_using_item && ABS_CustomOverlay::ITEM_PRIORITY >= 4
+        pick_action.call(:"item#{current_item_id}", :item, ABS_CustomOverlay::ITEM_LOOP)
+      end
+      if (key.nil? || key == '') && is_using_skill && ABS_CustomOverlay::SKILL_PRIORITY >= 4
+        pick_action.call(:"skill#{current_skill_id}", :skill, ABS_CustomOverlay::SKILL_LOOP)
+      end
+      if (key.nil? || key == '') && is_custom_animation && ABS_CustomOverlay::CUSTOM_PRIORITY >= 4
+        k, m = abs_fetch_state_key(current_custom_name.to_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :custom
+          force_no_loop = !(@character.abs_custom_animation_loop rescue false)
+        end
+      end
+      if (key.nil? || key == '') && is_attacking && ABS_CustomOverlay::ATTACK_PRIORITY >= 4
+        k, m = abs_fetch_state_key(:attack, direction, sprite_direction, config)
+        if k && k != ''
+          k = ABS_CustomOverlay.resolve_attack_key(k, @character)
+          key = k; use_mirror = m; animation_type = :attack
+          force_no_loop = !ABS_CustomOverlay::ATTACK_LOOP
+        end
+      end
+
+      # Прыжок
+      if (key.nil? || key == '') && is_jumping && ABS_CustomOverlay::JUMP_PRIORITY
+        k, m = abs_fetch_state_key(:jump, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :jump
+          force_no_loop = !ABS_CustomOverlay::JUMP_LOOP
+        end
+      end
+
+      # Приоритет 3
+      if (key.nil? || key == '') && is_using_item && ABS_CustomOverlay::ITEM_PRIORITY >= 3
+        pick_action.call(:"item#{current_item_id}", :item, ABS_CustomOverlay::ITEM_LOOP)
+      end
+      if (key.nil? || key == '') && is_using_skill && ABS_CustomOverlay::SKILL_PRIORITY >= 3
+        pick_action.call(:"skill#{current_skill_id}", :skill, ABS_CustomOverlay::SKILL_LOOP)
+      end
+      if (key.nil? || key == '') && is_custom_animation && ABS_CustomOverlay::CUSTOM_PRIORITY >= 3
+        k, m = abs_fetch_state_key(current_custom_name.to_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :custom
+          force_no_loop = !(@character.abs_custom_animation_loop rescue false)
+        end
+      end
+      if (key.nil? || key == '') && is_attacking && ABS_CustomOverlay::ATTACK_PRIORITY >= 3
+        k, m = abs_fetch_state_key(:attack, direction, sprite_direction, config)
+        if k && k != ''
+          k = ABS_CustomOverlay.resolve_attack_key(k, @character)
+          key = k; use_mirror = m; animation_type = :attack
+          force_no_loop = !ABS_CustomOverlay::ATTACK_LOOP
+        end
+      end
+
+      # Блок (приоритет 2)
+      if (key.nil? || key == '') && is_blocking && is_moving && ABS_CustomOverlay::BLOCK_PRIORITY >= 2
+        pick_action.call(:block, :block, ABS_CustomOverlay::BLOCK_LOOP)
+      end
+      if (key.nil? || key == '') && is_blocking && !is_moving && ABS_CustomOverlay::BLOCK_PRIORITY >= 2
+        k, m = abs_fetch_state_key(:block_idle, direction, sprite_direction, config)
+        k, m = abs_fetch_state_key(:block, direction, sprite_direction, config) if (k.nil? || k == '')
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :block_idle
+          force_no_loop = !ABS_CustomOverlay::BLOCK_LOOP
+        end
+      end
+
+      # Приоритет 2
+      if (key.nil? || key == '') && is_using_item && ABS_CustomOverlay::ITEM_PRIORITY >= 2
+        pick_action.call(:"item#{current_item_id}", :item, ABS_CustomOverlay::ITEM_LOOP)
+      end
+      if (key.nil? || key == '') && is_using_skill && ABS_CustomOverlay::SKILL_PRIORITY >= 2
+        pick_action.call(:"skill#{current_skill_id}", :skill, ABS_CustomOverlay::SKILL_LOOP)
+      end
+      if (key.nil? || key == '') && is_custom_animation && ABS_CustomOverlay::CUSTOM_PRIORITY >= 2
+        k, m = abs_fetch_state_key(current_custom_name.to_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :custom
+          force_no_loop = !(@character.abs_custom_animation_loop rescue false)
+        end
+      end
+      if (key.nil? || key == '') && is_attacking && ABS_CustomOverlay::ATTACK_PRIORITY >= 2
+        k, m = abs_fetch_state_key(:attack, direction, sprite_direction, config)
+        if k && k != ''
+          k = ABS_CustomOverlay.resolve_attack_key(k, @character)
+          key = k; use_mirror = m; animation_type = :attack
+          force_no_loop = !ABS_CustomOverlay::ATTACK_LOOP
+        end
+      end
+
+      # Бег / Рывок
+      if (key.nil? || key == '') && is_moving && is_dashing
+        k, m = abs_fetch_state_key(:run, direction, sprite_direction, config)
+        if k.nil? || k == ''
+          k, m = abs_fetch_state_key(:dash, direction, sprite_direction, config)
+          animation_type = :dash if k && k != ''
+        else
+          animation_type = :run if k && k != ''
+        end
+        key = k; use_mirror = m if k && k != ''
+      end
+
+      # Блок (приоритет 1)
+      if (key.nil? || key == '') && is_blocking && is_moving && ABS_CustomOverlay::BLOCK_PRIORITY >= 1
+        pick_action.call(:block, :block, ABS_CustomOverlay::BLOCK_LOOP)
+      end
+
+      # Приоритет 1
+      if (key.nil? || key == '') && is_using_item && ABS_CustomOverlay::ITEM_PRIORITY >= 1
+        pick_action.call(:"item#{current_item_id}", :item, ABS_CustomOverlay::ITEM_LOOP)
+      end
+      if (key.nil? || key == '') && is_using_skill && ABS_CustomOverlay::SKILL_PRIORITY >= 1
+        pick_action.call(:"skill#{current_skill_id}", :skill, ABS_CustomOverlay::SKILL_LOOP)
+      end
+      if (key.nil? || key == '') && is_custom_animation && ABS_CustomOverlay::CUSTOM_PRIORITY >= 1
+        k, m = abs_fetch_state_key(current_custom_name.to_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :custom
+          force_no_loop = !(@character.abs_custom_animation_loop rescue false)
+        end
+      end
+      if (key.nil? || key == '') && is_attacking && ABS_CustomOverlay::ATTACK_PRIORITY >= 1
+        k, m = abs_fetch_state_key(:attack, direction, sprite_direction, config)
+        if k && k != ''
+          k = ABS_CustomOverlay.resolve_attack_key(k, @character)
+          key = k; use_mirror = m; animation_type = :attack
+          force_no_loop = !ABS_CustomOverlay::ATTACK_LOOP
+        end
+      end
+
+      # Ходьба
+      if (key.nil? || key == '') && is_moving
+        unless @character.instance_variable_get(:@abs_appearance_playing)
+          k, m = abs_fetch_state_key(:walk, direction, sprite_direction, config)
+          if k && k != ''
+            key = k; use_mirror = m; animation_type = :walk
+          end
+        end
+      end
+
+      # Блок стоя (низкий приоритет)
+      if (key.nil? || key == '') && is_blocking && !is_moving
+        unless @character.instance_variable_get(:@abs_appearance_playing)
+          k, m = abs_fetch_state_key(:block_idle, direction, sprite_direction, config)
+          k, m = abs_fetch_state_key(:block, direction, sprite_direction, config) if (k.nil? || k == '')
+          if k && k != ''
+            key = k; use_mirror = m; animation_type = :block_idle
+            force_no_loop = !ABS_CustomOverlay::BLOCK_LOOP
+          end
+        end
+      end
+
+      # Приоритет 0 (без движения)
+      if (key.nil? || key == '') && is_using_item && !is_moving
+        k, m = abs_fetch_state_key(:"item#{current_item_id}", direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :item
+          force_no_loop = !ABS_CustomOverlay::ITEM_LOOP
+        end
+      end
+      if (key.nil? || key == '') && is_using_skill && !is_moving
+        k, m = abs_fetch_state_key(:"skill#{current_skill_id}", direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :skill
+          force_no_loop = !ABS_CustomOverlay::SKILL_LOOP
+        end
+      end
+      if (key.nil? || key == '') && is_custom_animation && !is_moving
+        k, m = abs_fetch_state_key(current_custom_name.to_sym, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :custom
+          force_no_loop = !(@character.abs_custom_animation_loop rescue false)
+        end
+      end
+      if (key.nil? || key == '') && is_attacking && !is_moving
+        k, m = abs_fetch_state_key(:attack, direction, sprite_direction, config)
+        if k && k != ''
+          k = ABS_CustomOverlay.resolve_attack_key(k, @character)
+          key = k; use_mirror = m; animation_type = :attack
+          force_no_loop = !ABS_CustomOverlay::ATTACK_LOOP
+        end
+      end
+
+      # Ожидание (Idle)
+      if (key.nil? || key == '') && !is_moving
+        k, m = abs_fetch_state_key(:idle, direction, sprite_direction, config)
+        if k && k != ''
+          key = k; use_mirror = m; animation_type = :idle
+        end
+      end
+
+      # Продолжение зафиксированного non-loop действия
+      if !is_dying && @abs_locked_action_key && @abs_locked_action_key != ''
+        key = @abs_locked_action_key
+        animation_type = @abs_locked_action_type
+        force_no_loop = true
+      end
+
+      if key.nil? || key == ''
+        abs_overlay_dispose_overlay
+        return
+      end
+
+      # ── Автоцепочка сегментов анимации ────────────────────────────────────
+      @abs_chain_base_key ||= nil
+      @abs_chain_segment  ||= 0
+      @abs_chain_enabled  ||= false
+
+      should_reinit_chain =
+        (@abs_chain_base_key != key) ||
+        @abs_death_frame_reset ||
+        (animation_type == :jump       && @abs_jump_frame_reset)   ||
+        (animation_type == :block      && @abs_block_frame_reset)  ||
+        (animation_type == :block_idle && @abs_block_frame_reset)  ||
+        (animation_type == :attack     && @abs_attack_frame_reset) ||
+        (animation_type == :item       && @abs_item_frame_reset)   ||
+        (animation_type == :skill      && @abs_skill_frame_reset)  ||
+        (animation_type == :custom     && @abs_custom_frame_reset)
+        
+      if should_reinit_chain
+        @abs_chain_base_key = key
+        @abs_chain_segment  = 0
+        @abs_chain_enabled  = ABS_CustomOverlay.chain_available?(key)
+      end
+      
+      # Синхронизация skill-таймера с длиной цепочки
+      if should_reinit_chain && animation_type == :skill && @abs_chain_enabled
+        total = ABS_CustomOverlay.total_frames_for_key(@character, key, config)
+        spd   = ABS_CustomOverlay.get_animation_speed(:skill, current_skill_id)
+        spd   = 1 if spd.nil? || spd < 1
+        @abs_skill_timer = total * spd
+      end
+
+      if !@abs_locked_action_key && force_no_loop && @abs_chain_enabled && animation_type != :death
+        @abs_locked_action_key  = key
+        @abs_locked_action_type = animation_type
+      end
+      
+      current_draw_key = @abs_chain_enabled ? ABS_CustomOverlay.chain_key(@abs_chain_base_key, @abs_chain_segment) : key
+
+      bmp = ABS_CustomOverlay.bitmap(current_draw_key)
+      if bmp.nil?
+        abs_overlay_dispose_overlay
+        return
+      end
+
+      # ── Инициализация и обновление спрайта ────────────────────────────────
+      if @abs_overlay_sprite.nil? || @abs_overlay_sprite.disposed?
+        @abs_overlay_sprite        = Sprite.new(@viewport)
+        @abs_overlay_frame_counter = 0
+        @abs_overlay_current_frame = 0
+        @abs_overlay_total_frames  = 1
+      end
+
+      key_changed =
+        @abs_overlay_key_cached != current_draw_key ||
+        @abs_jump_frame_reset   || @abs_block_frame_reset  || @abs_attack_frame_reset ||
+        @abs_item_frame_reset   || @abs_skill_frame_reset  || @abs_custom_frame_reset ||
+        @abs_death_frame_reset
+
+      if key_changed
+        @abs_overlay_sprite.bitmap  = bmp
+        @abs_overlay_key_cached     = current_draw_key
+        @abs_overlay_frame_counter  = 0
+        @abs_overlay_current_frame  = 0
+
+        @abs_jump_frame_reset   = false
+        @abs_block_frame_reset  = false
+        @abs_attack_frame_reset = false
+        @abs_item_frame_reset   = false
+        @abs_skill_frame_reset  = false
+        @abs_custom_frame_reset = false
+        @abs_death_frame_reset  = false
+
+        fw, fh = ABS_CustomOverlay.get_frame_size_for_key(@character, current_draw_key, config)
+        fw = 1 if fw <= 0
+        @abs_overlay_total_frames = bmp.width / fw
+        @abs_overlay_total_frames = 1 if @abs_overlay_total_frames <= 0
+      end
+
+      # ── Скорость анимации ─────────────────────────────────────────────────
+      current_speed = ABS_CustomOverlay::ANIMATION_SPEED
+      if config[:animation_speeds] && config[:animation_speeds][animation_type]
+        current_speed = config[:animation_speeds][animation_type]
+      elsif animation_type == :item
+        current_speed = ABS_CustomOverlay.get_animation_speed(:item, current_item_id)
+      elsif animation_type == :skill
+        current_speed = ABS_CustomOverlay.get_animation_speed(:skill, current_skill_id)
+      elsif animation_type == :custom
+        current_speed = ABS_CustomOverlay.get_animation_speed(:custom, current_custom_name)
+      elsif animation_type
+        current_speed = ABS_CustomOverlay.get_animation_speed(animation_type)
+      end
+      current_speed = 1 if current_speed.nil? || current_speed < 1
+
+      # ── Продвижение кадра ─────────────────────────────────────────────────
+      @abs_overlay_frame_counter += 1
+
+      if @abs_overlay_frame_counter >= current_speed
+        @abs_overlay_frame_counter = 0
+
+        if force_no_loop
+          if @abs_overlay_current_frame < (@abs_overlay_total_frames - 1)
+            @abs_overlay_current_frame += 1
+          else
+            if @abs_chain_enabled
+              next_segment = @abs_chain_segment + 1
+              next_key     = ABS_CustomOverlay.chain_key(@abs_chain_base_key, next_segment)
+              if ABS_CustomOverlay.bitmap(next_key)
+                @abs_chain_segment = next_segment
+                @abs_overlay_current_frame = 0
+                @abs_overlay_frame_counter = 0
+                @abs_overlay_key_cached    = nil
+              else
+                if animation_type == :death
+                  @abs_death_animation_complete = true
+                  @character.instance_variable_set(:@abs_death_animation_complete, true) if @character
+                elsif @abs_locked_action_key == @abs_chain_base_key
+                  @abs_chain_base_key = @abs_locked_action_key
+                  @abs_locked_action_key  = nil
+                  @abs_locked_action_type = nil
+                end
+              end
+            else
+              if animation_type == :death
+                @abs_death_animation_complete = true
+                @character.instance_variable_set(:@abs_death_animation_complete, true) if @character
+              elsif @abs_locked_action_key
+                @abs_chain_base_key = @abs_locked_action_key
+                @abs_locked_action_key  = nil
+                @abs_locked_action_type = nil
+              end
+            end
+          end
+        else
+          if @abs_overlay_current_frame < (@abs_overlay_total_frames - 1)
+            @abs_overlay_current_frame += 1
+          else
+            if @abs_chain_enabled
+              next_segment = @abs_chain_segment + 1
+              next_key     = ABS_CustomOverlay.chain_key(@abs_chain_base_key, next_segment)
+              @abs_chain_segment = ABS_CustomOverlay.bitmap(next_key) ? next_segment : 0
+              @abs_overlay_current_frame = 0
+              @abs_overlay_frame_counter = 0
+              @abs_overlay_key_cached    = nil
+            else
+              @abs_overlay_current_frame = 0
+            end
+          end
+        end
+      end
+
+      # ── Отрисовка ─────────────────────────────────────────────────────────
+      fw, fh = ABS_CustomOverlay.get_frame_size_for_key(@character, current_draw_key, config)
+      fw = 1 if fw <= 0
+      fh = 1 if fh <= 0
+
+      frame = @abs_overlay_current_frame
+
+      if ABS_CustomOverlay::STRIP_MODE == :directional
+        row = case direction
+              when 2 then 0
+              when 4 then 1
+              when 6 then 2
+              else        3
+              end
+        @abs_overlay_sprite.src_rect.set(frame * fw, row * fh, fw, fh)
+      else
+        @abs_overlay_sprite.src_rect.set(frame * fw, 0, fw, fh)
+      end
+
+      @abs_overlay_sprite.ox = fw / 2
+      @abs_overlay_sprite.oy = fh / 2
+
+      @abs_overlay_sprite.x = base.x + ABS_CustomOverlay::OFFSET_X
+      @abs_overlay_sprite.y = base.y + ABS_CustomOverlay::OFFSET_Y
+      #@abs_overlay_sprite.z = (base.z rescue 0) + ABS_CustomOverlay::Z_PLUS
+
+      z_plus = (config[:z_plus] || ABS_CustomOverlay::Z_PLUS)
+      @abs_overlay_sprite.z = (base.z rescue 0) + z_plus
+
+      @abs_overlay_sprite.mirror = use_mirror if @abs_overlay_sprite.respond_to?(:mirror=)
+
+      @abs_overlay_sprite.visible    = true
+      @abs_overlay_sprite.opacity    = 255
+      @abs_overlay_sprite.blend_type = 0
+    end
+
+    #==========================================================================
+    # :: Скрытие оригинального спрайта
+    #==========================================================================
+
+    def abs_overlay_hide_original
+      return unless ABS_CustomOverlay::HIDE_ORIGINAL_SPRITE
+
+      base = @sprite
+      return if base.nil? || base.disposed?
+      return unless @character
+
+      cname = @character.character_name.to_s
+      if cname =~ /_crp$/i
+        cfg = @character.abs_sprite_config rescue nil
+        return unless (cfg && cfg[:death] && !@abs_death_animation_complete)
+      end
+
+      config = @character.abs_sprite_config
+      return if config.nil? || config.empty?
+      
+      # Скрываем базовый спрайт только если оверлей реально отрисовывается
+      return if @abs_overlay_sprite.nil? || (@abs_overlay_sprite.disposed? rescue true)
+
+
+      base.src_rect.set(0, 0, 0, 0) if base.respond_to?(:src_rect) && base.src_rect
+      end
+
+    #==========================================================================
+    # :: Очистка ресурсов оверлея
+    #==========================================================================
+    
+    def abs_overlay_dispose_overlay
+      if @abs_overlay_sprite && !@abs_overlay_sprite.disposed?
+        @abs_overlay_sprite.dispose
+      end
+
+      @abs_overlay_sprite           = nil
+      @abs_overlay_key_cached       = nil
+      @abs_overlay_frame_counter    = 0
+      @abs_overlay_current_frame    = 0
+      @abs_overlay_total_frames     = 0
+      @abs_last_real_x              = nil
+      @abs_last_real_y              = nil
+      @abs_jump_active              = nil
+      @abs_jump_frame_reset         = nil
+      @abs_block_active             = nil
+      @abs_block_frame_reset        = nil
+      @abs_attack_frame_reset       = nil
+      @abs_attack_timer             = nil
+      @abs_item_timer               = nil
+      @abs_item_frame_reset         = nil
+      @abs_skill_timer              = nil
+      @abs_skill_frame_reset        = nil
+      @abs_custom_timer             = nil
+      @abs_custom_frame_reset       = nil
+      @abs_locked_action_key        = nil
+      @abs_locked_action_type       = nil
+      @abs_chain_base_key           = nil
+      @abs_chain_segment            = 0
+      @abs_chain_enabled            = false
+      @abs_death_started            = nil
+      @abs_death_animation_complete = nil
+      @abs_death_frame_reset        = nil
+      @abs_death_original_name      = nil
+      @abs_death_key_cached         = nil
+    end
+
+  end
+end # class Control_Sprite_Character
+
+#==============================================================================
+# ■ Scene_Map - Отслеживание использования предметов
+#------------------------------------------------------------------------------
+# Перехватывает уменьшение количества предметов в инвентаре для запуска анимаций.
+# Совместимо с RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+if defined?(Control_Sprite_Character)
+  class Scene_Map
+
+    #==========================================================================
+    # :: Перехват метода update
+    #--------------------------------------------------------------------------
+    # Отслеживает использование предметов игроком через сравнение их количества.
+    #==========================================================================
+    
+    if !method_defined?('abs_overlay_update_later')
+      alias abs_overlay_update_later update
+    end
+
+    def update
+      @abs_item_counts ||= {}
+
+      if $game_player
+        (1...$data_items.size).each do |item_id|
+          next unless $data_items[item_id]
+          
+          current_count = $game_party.item_number(item_id)
+          
+          # Детекция использования предмета
+          if !$game_player.abs_using_item
+            old_count = @abs_item_counts[item_id] || current_count
+            if current_count < old_count
+              $game_player.abs_using_item = true
+              $game_player.abs_current_item_id = item_id
+            end
+          end
+          
+          # Обновление кэша количества предметов
+          @abs_item_counts[item_id] = current_count
+        end
+      end
+
+      # Вызов оригинального метода update
+      abs_overlay_update_later
+    end
+
+  end # class Scene_Map
+end # if defined?(Control_Sprite_Character)
+
+#==============================================================================
+# ■ ABS Custom Overlay - Блокировка ввода
+#------------------------------------------------------------------------------
+# Система блокировки ввода во время воспроизведения анимаций.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+#==============================================================================
+# ■ Game_Temp - Хранение счётчика блокировки ввода
+#------------------------------------------------------------------------------
+# Расширение класса для отслеживания активных блокировок ввода.
+#==============================================================================
+
+class Game_Temp
+  
+  #============================================================================
+  # :: Атрибуты
+  #============================================================================
+  
+  # Счётчик активных блокировок ввода (0 = ввод разрешён)
+  attr_accessor :abs_input_lock_count
+
+  #============================================================================
+  # :: Перехват метода initialize
+  #============================================================================
+  
+  # Защита от повторного алиаса (в Ruby 1.8.1 instance_methods возвращает строки)
+  unless instance_methods(false).include?("abs_overlay_inputlock_init")
+    alias abs_overlay_inputlock_init initialize
+  end
+
+  def initialize
+    abs_overlay_inputlock_init
+    @abs_input_lock_count = 0
+  end
+
+end
+
+#==============================================================================
+# ■ ABS Custom Overlay - Система блокировки ввода
+#------------------------------------------------------------------------------
+# Управление блокировкой ввода во время воспроизведения анимаций.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+#==============================================================================
+# ■ ABS_InputLock - Управление счётчиком блокировок
+#------------------------------------------------------------------------------
+# Модуль для управления вложенными блокировками ввода через счётчик.
+#==============================================================================
+
+module ABS_InputLock
+
+  #============================================================================
+  # :: Управление счётчиком
+  #============================================================================
+  
+  # Увеличивает счётчик блокировок (поддерживает вложенные lock)
+  def self.lock
+    return unless $game_temp
+    $game_temp.abs_input_lock_count = $game_temp.abs_input_lock_count.to_i + 1
+  end
+
+  # Уменьшает счётчик блокировок (не опускается ниже нуля)
+  def self.unlock
+    return unless $game_temp
+    count = $game_temp.abs_input_lock_count.to_i - 1
+    $game_temp.abs_input_lock_count = [count, 0].max
+  end
+
+  # Проверяет наличие активных блокировок
+  def self.locked?
+    return false unless $game_temp
+    $game_temp.abs_input_lock_count.to_i > 0
+  end
+
+end
+
+#==============================================================================
+# ■ Input - Перехват методов при активной блокировке
+#------------------------------------------------------------------------------
+# Перехватывает все методы ввода для блокировки во время анимаций.
+# Использует respond_to? для проверки singleton-методов (Ruby 1.8.1).
+#==============================================================================
+
+module Input
+  class << self
+
+    #==========================================================================
+    # :: Перехват метода press?
+    #==========================================================================
+    
+    unless Input.respond_to?(:abs_overlay_press?)
+      alias abs_overlay_press? press?
+    end
+    
+    def press?(key)
+      return false if ABS_InputLock.locked?
+      abs_overlay_press?(key)
+    end
+
+    #==========================================================================
+    # :: Перехват метода trigger?
+    #==========================================================================
+    
+    unless Input.respond_to?(:abs_overlay_trigger?)
+      alias abs_overlay_trigger? trigger?
+    end
+    
+    def trigger?(key)
+      return false if ABS_InputLock.locked?
+      abs_overlay_trigger?(key)
+    end
+
+    #==========================================================================
+    # :: Перехват метода repeat?
+    #==========================================================================
+    
+    unless Input.respond_to?(:abs_overlay_repeat?)
+      alias abs_overlay_repeat? repeat?
+    end
+    
+    def repeat?(key)
+      return false if ABS_InputLock.locked?
+      abs_overlay_repeat?(key)
+    end
+
+    #==========================================================================
+    # :: Перехват метода dir4
+    #==========================================================================
+    
+    unless Input.respond_to?(:abs_overlay_dir4)
+      alias abs_overlay_dir4 dir4
+    end
+    
+    def dir4
+      return 0 if ABS_InputLock.locked?
+      abs_overlay_dir4
+    end
+
+    #==========================================================================
+    # :: Перехват метода dir8
+    #==========================================================================
+    
+    unless Input.respond_to?(:abs_overlay_dir8)
+      alias abs_overlay_dir8 dir8
+    end
+    
+    def dir8
+      return 0 if ABS_InputLock.locked?
+      abs_overlay_dir8
+    end
+
+  end
+end
+
+#==============================================================================
+# ■ Game_Character - Расширение пользовательских анимаций
+#------------------------------------------------------------------------------
+# Управление пользовательскими анимациями с автоматическим расчетом длительности
+# и блокировкой ввода для игрока.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+class Game_Character
+
+  #============================================================================
+  # :: Атрибуты
+  #============================================================================
+  
+  # Флаг блокировки ввода во время пользовательской анимации (только для игрока)
+  attr_accessor :abs_custom_lock_keys
+
+  #============================================================================
+  # :: Перехват метода play_custom_animation
+  #--------------------------------------------------------------------------
+  # Запускает пользовательскую анимацию с автоматическим расчетом длительности
+  # на основе количества кадров и скорости анимации.
+  #============================================================================
+  
+  alias abs_overlay_play_custom_animation_later play_custom_animation unless method_defined?(:abs_overlay_play_custom_animation_later)
+
+    def play_custom_animation(animation_name, duration = 60, loop_anim = nil, allow_movement = nil)
+    animation_name = animation_name.to_s
+
+    # Автоматический расчет длительности если не указана или невалидна
+    if duration.to_i < 1
+      # ИСПРАВЛЕНИЕ: Гарантируем, что cfg не будет nil
+      cfg = self.abs_sprite_config
+      cfg = {} if cfg.nil?
+      
+      pic_key = cfg[animation_name.to_sym]
+
+      # Получаем количество кадров из цепочки или одиночного файла
+      frames = ABS_CustomOverlay.total_frames_for_key(self, pic_key, cfg) rescue 1
+      frames = 1 if frames.nil? || frames <= 0
+
+      # Получаем скорость анимации
+      spd = ABS_CustomOverlay.get_animation_speed(:custom, animation_name)
+      spd = 1 if spd.nil? || spd < 1
+
+      duration = frames * spd
+    end
+
+    # Вызываем оригинальный метод
+    abs_overlay_play_custom_animation_later(animation_name, duration, loop_anim, allow_movement)
+
+    # Блокируем ввод для игрока если движение запрещено
+    if self == $game_player && !self.abs_custom_animation_movement
+      ABS_InputLock.lock
+      self.abs_custom_lock_keys = true
+    else
+      self.abs_custom_lock_keys = false
+    end
+  end
+
+  #============================================================================
+  # :: Перехват метода stop_custom_animation
+  #--------------------------------------------------------------------------
+  # Останавливает пользовательскую анимацию и разблокирует ввод если был заблокирован.
+  #============================================================================
+  
+  alias abs_overlay_stop_custom_animation_later stop_custom_animation unless method_defined?(:abs_overlay_stop_custom_animation_later)
+
+  def stop_custom_animation
+    # Разблокируем ввод если был заблокирован
+    if self == $game_player && self.abs_custom_lock_keys
+      ABS_InputLock.unlock
+      self.abs_custom_lock_keys = false
+    end
+
+    # Вызываем оригинальный метод
+    abs_overlay_stop_custom_animation_later
+  end
+
+end # class Game_Character
+
+#==============================================================================
+# ■ Interpreter - Сокращения и хелперы для событий
+#------------------------------------------------------------------------------
+# Методы для удобного запуска анимаций и настройки спрайтов из команд события.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+class Interpreter
+
+  #============================================================================
+  # :: Шорткаты для анимаций игрока
+  #============================================================================
+  
+  # Запуск пользовательской анимации игрока
+  # name      - имя анимации
+  # duration  - длительность (0 = авто)
+  # loop_anim - зациклить? (true/false)
+  # move      - разрешить движение? (true/false)
+  def anim(name, duration = 0, loop_anim = false, move = false)
+    $game_player.play_custom_animation(name, duration, loop_anim, move)
+  end
+
+  # Ожидание окончания пользовательской анимации игрока
+  # Блокирует выполнение события, пока анимация активна.
+  def wait_anim
+    if $game_player.custom_animation_playing?
+      @wait_count = 1
+      return false
+    end
+    true
+  end
+
+  #============================================================================
+  # :: Настройка спрайтов врагов и событий
+  #============================================================================
+
+  # Применяет конфигурацию спрайтов к объекту события (приватный метод)
+  def _apply_sprite_config(event, prefix, config)
+    return unless event
+
+    # Гарантируем инициализацию конфига
+    event.abs_sprite_config ||= {}
+    c = event.abs_sprite_config
+
+    if prefix
+      c[:walk]   = config[:walk]   || "#{prefix}walk"
+      c[:idle]   = config[:idle]   || "#{prefix}idle"
+      c[:attack] = config[:attack] || "#{prefix}attack"
+      c[:block]  = config[:block]  || "#{prefix}block"
+      c[:skill]  = config[:skill]  || "#{prefix}magic"
+      c[:default_direction] = config[:default_direction] || ABS_CustomOverlay::ENEMY_DEFAULT_DIRECTION
+    else
+      c.merge!(config)
+    end
+
+    c[:animation_speeds] = config[:animation_speeds] if config[:animation_speeds]
+  end
+  private :_apply_sprite_config
+
+  # Настраивает спрайты текущего события (вызывается из команды события)
+  def setup_enemy_sprites(prefix = nil, config = {})
+    event = get_character(0)
+    _apply_sprite_config(event, prefix, config)
+  end
+
+  # Настраивает спрайты события по его ID на текущей карте
+  def setup_enemy_by_id(event_id, prefix = nil, config = {})
+    event = $game_map.events[event_id]
+    _apply_sprite_config(event, prefix, config)
+  end
+
+  #============================================================================
+  # :: Управление действиями врагов
+  #============================================================================
+
+  # Активирует использование навыка текущим событием
+  def enemy_use_skill(skill_id, duration = nil)
+    event = get_character(0)
+    return unless event
+
+    if duration.nil? || duration <= 0
+      duration = ABS_CustomOverlay.get_skill_duration(skill_id)
+    end
+
+    event.abs_using_skill      = true
+    event.abs_current_skill_id = skill_id
+    event.abs_skill_duration   = duration
+  end
+
+  # Запускает произвольную анимацию для текущего события
+  def enemy_anim(name, duration = 0, loop_anim = false, move = false)
+    event = get_character(0)
+    return unless event
+    event.play_custom_animation(name, duration, loop_anim, move)
+  end
+
+end
+
+#==============================================================================
+# ■ Map_Enemy - Автоматическая настройка оверлеев по имени из БД
+#------------------------------------------------------------------------------
+# Автоматически подбирает и применяет конфигурацию спрайтов для врагов
+# на основе их имени в базе данных RPG Maker.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+if defined?(Map_Enemy)
+
+  class Map_Enemy < Map_Battler
+
+    #==========================================================================
+    # :: Перехват метода initialize
+    #--------------------------------------------------------------------------
+    # Инициализирует врага и запускает автоматическую настройку оверлеев.
+    #==========================================================================
+    
+    unless method_defined?(:abs_overlay_auto_init_name)
+      alias abs_overlay_auto_init_name initialize
+    end
+
+          def initialize(map_id, event, *args)
+      abs_overlay_auto_init_name(map_id, event, *args)
+
+      return unless @battler
+      
+      setup_overlay_from_database_name
+
+      # ЯДЕРНАЯ ИНИЦИАЛИЗАЦИЯ: обходим любые геттеры/сеттеры Blizz-ABS
+      cfg = instance_variable_get(:@abs_sprite_config)
+      cfg = {} if cfg.nil? || !cfg.is_a?(Hash)
+      instance_variable_set(:@abs_sprite_config, cfg)
+
+      # Запуск анимации появления
+      if cfg[:appearance] && !@abs_appearance_playing
+        play_custom_animation("appearance", 0, false, false)
+        @abs_appearance_playing = true
+      end
+    end
+
+    #==========================================================================
+    # :: Автоматическая настройка оверлеев
+    #--------------------------------------------------------------------------
+    # Ищет файлы в Graphics/Pictures по имени врага и заполняет конфигурацию.
+    #==========================================================================
+    
+        def setup_overlay_from_database_name
+      return unless @battler && @battler.id > 0
+      
+      enemy_data = $data_enemies[@battler.id]
+      return if enemy_data.nil?
+
+      clean_name = enemy_data.name.gsub(/\s+/, "")
+      prefix = "#{clean_name}_"
+
+      sizes_to_check = [
+        "344x257", "400x299", "120x120", "284x220", "200x136", "195x129",
+        "164x164", "160x160", "128x128", "96x96",
+        "64x64",   "48x48",   "32x32"
+      ]
+
+      found_size = nil
+      sizes_to_check.each do |size|
+        if FileTest.exist?("Graphics/Pictures/#{prefix}idle_#{size}.png") ||
+           FileTest.exist?("Graphics/Pictures/#{prefix}walk_#{size}.png")
+          found_size = size
+          break
+        end
+      end
+
+      has_idle = FileTest.exist?("Graphics/Pictures/#{prefix}idle.png")
+      has_walk = FileTest.exist?("Graphics/Pictures/#{prefix}walk.png")
+
+      return if !found_size && !has_idle && !has_walk
+
+      # ЯДЕРНАЯ ИНИЦИАЛИЗАЦИЯ
+      c = instance_variable_get(:@abs_sprite_config)
+      c = {} if c.nil? || !c.is_a?(Hash)
+      c[:default_direction] = 4
+
+      if found_size
+        size_parts = found_size.split("x")
+        c[:frame_width]  = size_parts[0].to_i
+        c[:frame_height] = size_parts[1].to_i
+      end
+
+      base = found_size ? "#{prefix}%s_#{found_size}" : "#{prefix}%s"
+
+      [:idle, :walk, :run, :dash, :jump, :block, :damage, 
+       :attack, :skill, :item, :death, :appearance].each do |state|
+        c[state] = base % state.to_s
+      end
+      c[:skill8] = c[:skill]
+
+      death_candidates = []
+      death_candidates << "#{prefix}death_#{found_size}"   if found_size
+      death_candidates << "#{prefix}death_#{found_size}_a" if found_size
+      death_candidates << "#{prefix}death"
+      death_candidates << "#{prefix}death_a"
+
+      death_candidates.each do |test_key|
+        if FileTest.exist?("Graphics/Pictures/#{test_key}.png")
+          c[:death] = test_key.sub(/_a$/, '')
+          break
+        end
+      end
+
+      anim_speeds = ABS_CustomOverlay::ENEMY_ANIMATION_SPEEDS[clean_name]
+      c[:animation_speeds] = anim_speeds if anim_speeds
+
+      # Сохраняем обратно в объект
+      instance_variable_set(:@abs_sprite_config, c)
+
+      if self.respond_to?(:src_rect) && self.src_rect
+        self.src_rect.set(0, 0, 0, 0)
+      end
+    end
+
+  end
+
+end # if defined?(Map_Enemy)
+
+#==============================================================================
+# ■ Blizz-ABS - Точное позиционирование дропа и трупов (ExactDrop Fix)
+#------------------------------------------------------------------------------
+# Исправляет возможное смещение спавна дропа/трупов, принудительно устанавливая
+# их координаты точно на тайл смерти врага.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+# Поиск целевого класса или модуля, содержащего метод create_drop_event
+target_class = nil
+
+if defined?(BlizzABS::Processor) && BlizzABS::Processor.method_defined?(:create_drop_event)
+  target_class = BlizzABS::Processor
+elsif defined?(BlizzABS) && BlizzABS.instance_methods(false).include?("create_drop_event")
+  target_class = BlizzABS
+end
+
+# Применение патча, если целевой метод найден
+if target_class
+  target_class.class_eval do
+
+    # Защита от повторного создания алиаса
+    unless method_defined?(:abs_exactdrop_create_drop_event)
+      alias_method :abs_exactdrop_create_drop_event, :create_drop_event
+    end
+
+    #==========================================================================
+    # :: Переопределение create_drop_event
+    #--------------------------------------------------------------------------
+    # Принудительно выравнивает координаты созданного события (дропа/трупа)
+    # по тайловым координатам смерти врага с учетом границ карты.
+    #==========================================================================
+    
+    def create_drop_event(x, y, character_name, character_hue = 0, trigger = 1)
+      # Вызов оригинального метода Blizz-ABS
+      event = abs_exactdrop_create_drop_event(x, y, character_name, character_hue, trigger)
+
+      if event
+        tx = x.to_i
+        ty = y.to_i
+
+        # Ограничение координат границами текущей карты
+        if $game_map
+          map_w = $game_map.width rescue 0
+          map_h = $game_map.height rescue 0
+          tx = [[tx, 0].max, map_w - 1].min if map_w > 0
+          ty = [[ty, 0].max, map_h - 1].min if map_h > 0
+        end
+
+        # Установка точных тайловых координат
+        event.x = tx
+        event.y = ty
+      end
+
+      event
+    end
+
+  end
+else
+  # Предупреждение можно раскомментировать для отладки, если патч не применился
+  # p "ABS ExactDrop: create_drop_event не найден в BlizzABS"
+end # if target_class
+
+#==============================================================================
+# ■ Blizz-ABS - Инвертированная логика трупов (Corpse only if NO loot)
+#------------------------------------------------------------------------------
+# Изменяет логику создания трупов: труп появляется ТОЛЬКО если враг не оставил
+# предметов. Если есть лут - создается только мешок с предметами без трупа.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+# Поиск целевого класса BlizzABS, содержащего метод remove_enemy
+target_class = nil
+
+if defined?(BlizzABS::Processor) && BlizzABS::Processor.instance_methods(false).include?("remove_enemy")
+  target_class = BlizzABS::Processor
+elsif defined?(BlizzABS) && BlizzABS.instance_methods(false).include?("remove_enemy")
+  target_class = BlizzABS
+end
+
+# Применение патча, если метод найден
+if target_class
+  target_class.class_eval do
+
+    #==========================================================================
+    # :: Переопределение remove_enemy
+    #--------------------------------------------------------------------------
+    # Удаляет врага с карты, начисляет награды и создает труп/лут по новой логике.
+    #==========================================================================
+    
+    def remove_enemy(enemy)
+      # Пропускаем уже обработанных или имеющих тело врагов
+      return if enemy.execute || enemy.erased || enemy.body
+
+      # Запуск триггера смерти перед удалением
+      enemy.start if enemy.trigger == BlizzABS::CETDeath
+
+      # Удаление события с карты
+      $game_map.events.delete(enemy.id)
+
+      # Сбор выпадающих предметов
+      items = drop_items(enemy)
+
+      # Если предметы не дропаются на карту - добавляем сразу в инвентарь
+      unless BlizzABS::Config::ITEM_DROP
+        items.each do |item|
+          case item
+          when RPG::Weapon then $game_party.gain_weapon(item.id, 1)
+          when RPG::Armor  then $game_party.gain_armor(item.id, 1)
+          when RPG::Item   then $game_party.gain_item(item.id, 1)
+          end
+        end
+        items = []
+      end
+
+      # Начисление опыта и золота
+      exp_result(enemy)
+      gold = gold_result(enemy)
+
+      # Обработка золота в зависимости от конфигурации
+      gold_cfg = BlizzABS::Config::GOLD_DROP rescue nil
+      if gold_cfg.nil? || gold_cfg == ""
+        $game_party.gain_gold(gold)
+      elsif gold > 0
+        items = [gold] + items
+      end
+
+      additional_result(enemy)
+
+      # Размещение трупа и предметов на карте
+      if BlizzABS::Config::CORPSES
+        if items.size > 0
+          # Есть лут - дропаем только предметы (труп не создается)
+          drop_event(items, enemy.real_x, enemy.real_y, nil)
+        elsif BlizzABS::Config::EMPTY_CORPSES
+          # Нет лута - показываем пустой труп
+          drop_event([], enemy.real_x, enemy.real_y, enemy)
+        end
+      else
+        # Режим без трупов - каждый предмет отдельным событием
+        items.each { |item| drop_event([item], enemy.real_x, enemy.real_y) }
+      end
+    end
+
+  end
+else
+  # Предупреждение для отладки (раскомментируйте при необходимости)
+  # print "ABS Invert Corpse: remove_enemy не найден в BlizzABS\n"
+end
+
+#==============================================================================
+# ■ Blizz-ABS - Очистка конфигурации смерти у трупов
+#------------------------------------------------------------------------------
+# Сбрасывает конфигурацию анимации смерти у событий-трупов (_crp), чтобы они
+# не воспроизводили анимацию смерти повторно после создания.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+#==============================================================================
+# ■ ABS_CorpseFixMixin - Модуль патча для drop_event
+#------------------------------------------------------------------------------
+# Вспомогательный модуль для применения патча к классам BlizzABS.
+#==============================================================================
+
+module ABS_CorpseFixMixin
+
+  #============================================================================
+  # :: Применение патча к целевому классу
+  #============================================================================
+  
+  def self.apply_to(klass)
+    return if klass.method_defined?(:abs_corpse_fix_drop_event)
+    
+    klass.class_eval do
+      alias abs_corpse_fix_drop_event drop_event
+
+      # Переопределение drop_event для очистки конфига смерти у трупов
+      def drop_event(items, x, y, dropper = nil)
+        result = abs_corpse_fix_drop_event(items, x, y, dropper)
+
+        # Применяем патч только если есть dropper (враг) и результат
+        if dropper && result
+          # Нормализуем результат в массив
+          events = Array(result)
+
+          events.each do |ev|
+            next unless ev
+
+            # Получаем имя персонажа
+            cname = ev.character_name.to_s rescue ""
+            
+            # Проверяем, является ли событие трупом (суффикс _crp)
+            next unless cname =~ /_crp$/i
+
+            # Получаем конфигурацию спрайтов
+            cfg = ev.abs_sprite_config rescue nil
+            next unless cfg
+
+            # Удаляем ключ смерти и сбрасываем флаги анимации
+            cfg.delete(:death)
+            ev.instance_variable_set(:@abs_death_started, nil)
+            ev.instance_variable_set(:@abs_death_animation_complete, true)
+            ev.instance_variable_set(:@abs_death_frame_reset, nil)
+            ev.instance_variable_set(:@abs_death_original_name, nil)
+          end
+        end
+
+        result
+      end
+
+    end
+  end
+
+end
+
+#==============================================================================
+# ■ Применение патча к BlizzABS
+#------------------------------------------------------------------------------
+# Применяет модуль к BlizzABS::Processor или BlizzABS в зависимости от доступности.
+#==============================================================================
+
+if defined?(BlizzABS::Processor)
+  ABS_CorpseFixMixin.apply_to(BlizzABS::Processor)
+elsif defined?(BlizzABS)
+  ABS_CorpseFixMixin.apply_to(BlizzABS)
+end
+
+#==============================================================================
+# ■ Blizz-ABS - Отложенное удаление врагов (Death Delay)
+#------------------------------------------------------------------------------
+# Откладывает вызов remove_enemy до окончания анимации смерти.
+# Предотвращает преждевременное появление трупа и лута на карте.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+module ABS_DeathDelay
+  
+  #============================================================================
+  # :: Настройки и очередь
+  #============================================================================
+  
+  # Сдвиг задержки для точной синхронизации (отрицательное = раньше, положительное = позже)
+  DEATH_DELAY_OFFSET = -3
+  
+  # Очередь отложенных действий [кадры_до_выполнения, блок]
+  @queue = []
+
+  #============================================================================
+  # :: Расчет задержки
+  #============================================================================
+  
+  # Вычисляет задержку в кадрах для конкретного врага на основе длины анимации смерти
+  def self.death_delay_frames(enemy)
+    return 0 unless enemy && enemy.respond_to?(:abs_sprite_config)
+
+    cfg = enemy.abs_sprite_config rescue nil
+    return 0 if cfg.nil?
+
+    key = cfg[:death]
+    return 0 if key.nil? || key.to_s.empty?
+
+    # Используем встроенный метод для подсчета кадров (автоматически поддерживает цепочки _a/_b)
+    total_frames = ABS_CustomOverlay.total_frames_for_key(enemy, key, cfg)
+    return 0 if total_frames <= 0
+
+    # Определение скорости анимации смерти
+    spd = if cfg[:animation_speeds] && cfg[:animation_speeds][:death]
+            cfg[:animation_speeds][:death].to_i
+          else
+            ABS_CustomOverlay.get_animation_speed(:death).to_i
+          end
+    spd = 1 if spd < 1
+
+    # Расчет итоговой задержки с учетом смещения (минимум 1 кадр)
+    delay = (total_frames * spd) + DEATH_DELAY_OFFSET
+    [delay, 1].max
+  end
+
+  #============================================================================
+  # :: Управление очередью
+  #============================================================================
+
+  # Добавляет действие в очередь отложенного выполнения
+  def self.enqueue(frames, &block)
+    frames = [frames.to_i, 0].max
+    @queue << [frames, block]
+  end
+
+  # Ожидание фактического завершения анимации смерти (с проверкой флага)
+  def self.wait_until_death_complete(enemy, max_frames, &block)
+    max_frames = [max_frames.to_i, 1].max
+    
+    enqueue(1) do
+      done = enemy.nil? || 
+             (enemy.erased rescue false) || 
+             enemy.instance_variable_get(:@abs_death_animation_complete)
+      
+      if done || max_frames <= 1
+        block.call if block
+      else
+        wait_until_death_complete(enemy, max_frames - 1, &block)
+      end
+    end
+  end
+
+  # Обновление очереди (вызывается каждый кадр)
+  def self.update
+    return if @queue.empty?
+    
+    # Обрабатываем только элементы, присутствующие на начало кадра.
+    # Новые элементы, добавленные внутри callback, уйдут на следующий кадр.
+    current_queue = @queue.dup
+    @queue.clear
+    
+    current_queue.each do |item|
+      item[0] -= 1
+      
+      if item[0] <= 0
+        begin
+          item[1].call if item[1]
+        rescue
+        end
+      else
+        @queue << item
+      end
+    end
+  end
+  
+end
+
+#==============================================================================
+# ■ Scene_Map - Интеграция обновления очереди
+#==============================================================================
+
+class Scene_Map
+  
+  unless method_defined?(:abs_deathdelay_update)
+    alias abs_deathdelay_update update
+  end
+  
+  def update
+    ABS_DeathDelay.update
+    abs_deathdelay_update
+  end
+  
+end
+
+#==============================================================================
+# ■ BlizzABS - Перехват remove_enemy
+#==============================================================================
+
+target_class = nil
+if defined?(BlizzABS::Processor) && BlizzABS::Processor.method_defined?(:remove_enemy)
+  target_class = BlizzABS::Processor
+elsif defined?(BlizzABS) && BlizzABS.method_defined?(:remove_enemy)
+  target_class = BlizzABS
+end
+
+if target_class
+  target_class.class_eval do
+    
+    unless method_defined?(:abs_deathdelay_remove_enemy_now)
+      alias abs_deathdelay_remove_enemy_now remove_enemy
+    end
+
+    # Переопределение remove_enemy для отложенного выполнения
+    def remove_enemy(enemy)
+      return abs_deathdelay_remove_enemy_now(enemy) if enemy.nil?
+
+      # Защита от повторного добавления в очередь
+      return if enemy.instance_variable_get(:@abs_deathdelay_pending)
+
+      delay = ABS_DeathDelay.death_delay_frames(enemy)
+      
+      if delay > 0
+        enemy.instance_variable_set(:@abs_deathdelay_pending, true)
+        
+        ABS_DeathDelay.enqueue(delay) do
+          enemy.instance_variable_set(:@abs_deathdelay_pending, nil)
+          # Удаляем врага только если он всё ещё присутствует на карте
+          if $game_map.events[enemy.id] == enemy
+            abs_deathdelay_remove_enemy_now(enemy)
+          end
+        end
+      else
+        abs_deathdelay_remove_enemy_now(enemy)
+      end
+    end
+    
+  end
+end
+
+#==============================================================================
+# ■ Blizz-ABS - Исправление порядка отрисовки (Draw Order Fix)
+#------------------------------------------------------------------------------
+# Принудительно устанавливает Z-координату врагов, трупов и лута ниже слоя игрока,
+# предотвращая их отрисовку поверх персонажа.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+module ABS_DrawOrderFix
+
+  #============================================================================
+  # :: Проверка типа объекта
+  #============================================================================
+  
+  # Определяет, должен ли объект рисоваться ниже игрока
+  # Возвращает true для врагов, трупов и лута
+  def self.force_under_player?(ch)
+    return false if ch.nil?
+    return false if $game_player && ch == $game_player
+
+    # Прямая проверка класса врага
+    return true if defined?(Map_Enemy) && ch.is_a?(Map_Enemy)
+
+    # Проверка через Map_Battler (если есть battler-враг)
+    if defined?(Map_Battler) && ch.is_a?(Map_Battler)
+      b = ch.battler rescue nil
+      return true if defined?(Game_Enemy) && b.is_a?(Game_Enemy)
+    end
+
+    # Труп определяется по суффиксу _crp в имени персонажа
+    cname = ch.character_name.to_s rescue ""
+    return true if cname =~ /_crp$/i
+
+    # Лут: проверка через метод dropped? или по имени события
+    return true if ch.respond_to?(:dropped?) && ch.dropped?
+    
+    evname = ch.event.name.to_s rescue ""
+    return true if evname =~ /^DROP\d+$/i
+
+    false
+  end
+
+  #============================================================================
+  # :: Работа с Z-координатами
+  #============================================================================
+
+  # Получает экранные Z-координаты игрока
+  def self.player_z
+    return 0 unless $game_player
+    ($game_player.screen_z(0) rescue 0).to_i
+  end
+
+  # Ограничивает Z-координату объекта строго ниже игрока
+  def self.clamp_below_player(current_z)
+    target = player_z - 1
+    target = 0 if target < 0
+    [current_z.to_i, target].min
+  end
+
+end
+
+#==============================================================================
+# ■ Sprite_Character - Коррекция Z-слоя базовых спрайтов
+#------------------------------------------------------------------------------
+# Принудительно опускает Z-слой врагов, трупов и лута ниже игрока,
+# чтобы они не перекрывали персонажа при отрисовке.
+#==============================================================================
+
+class Sprite_Character
+
+  # Защита от повторного алиаса
+  unless method_defined?(:abs_draworderfix_update)
+    alias abs_draworderfix_update update
+  end
+
+  def update
+    abs_draworderfix_update
+    
+    # Применяем коррекцию только к специфичным объектам (враги, трупы, лут)
+    if ABS_DrawOrderFix.force_under_player?(@character)
+      self.z = ABS_DrawOrderFix.clamp_below_player(self.z)
+    end
+  end
+
+end
+
+#==============================================================================
+# ■ Control_Sprite_Character - Коррекция Z-слоя оверлейных спрайтов
+#------------------------------------------------------------------------------
+# Синхронизирует Z-слой оверлея с базовым спрайтом для корректной отрисовки.
+# Патч применяется только если класс Control_Sprite_Character существует.
+#==============================================================================
+
+if defined?(Control_Sprite_Character)
+
+  class Control_Sprite_Character
+
+    # Защита от повторного алиаса
+    unless method_defined?(:abs_draworderfix_abs_overlay_update)
+      alias abs_draworderfix_abs_overlay_update abs_overlay_update
+    end
+
+    def abs_overlay_update
+      abs_draworderfix_abs_overlay_update
+      
+      # Пропускаем, если спрайт оверлея не создан или уже уничтожен
+      return if @abs_overlay_sprite.nil? || @abs_overlay_sprite.disposed?
+      
+      # Применяем коррекцию Z-слоя для оверлея
+      if ABS_DrawOrderFix.force_under_player?(@character)
+        @abs_overlay_sprite.z = ABS_DrawOrderFix.clamp_below_player(@abs_overlay_sprite.z)
+      end
+    end
+
+  end
+
+end # if defined?(Control_Sprite_Character)
+
+#==============================================================================
+# ■ Blizz-ABS - Отключение прижимания живых врагов (No Enemy Clamping)
+#------------------------------------------------------------------------------
+# Модификация модуля ABS_DrawOrderFix: живые враги больше не принудительно
+# рисуются под игроком. Под игроком по Z-оси остаются только трупы и лут.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+if defined?(ABS_DrawOrderFix)
+  
+  # Защита от повторного создания алиаса для singleton-метода
+  unless ABS_DrawOrderFix.respond_to?(:abs_no_enemy_clamp_force_under_player)
+    
+    class << ABS_DrawOrderFix
+      
+      alias_method :abs_no_enemy_clamp_force_under_player, :force_under_player?
+
+      # Переопределение метода: исключает живых врагов из принудительного Z-сдвига
+      def force_under_player?(ch)
+        return false if ch.nil?
+        return false if $game_player && ch == $game_player
+
+        # Живые враги (Map_Enemy) не прижимаются под игрока
+        return false if defined?(Map_Enemy) && ch.is_a?(Map_Enemy)
+        
+        # Проверка через Map_Battler на наличие Game_Enemy
+        if defined?(Map_Battler) && ch.is_a?(Map_Battler)
+          b = ch.battler rescue nil
+          return false if defined?(Game_Enemy) && b.is_a?(Game_Enemy)
+        end
+
+        # Для остальных объектов (трупы, лут) используется оригинальная логика
+        abs_no_enemy_clamp_force_under_player(ch)
+      end
+      
+    end
+    
+  end
+  
+end # if defined?(ABS_DrawOrderFix)
+
+#==============================================================================
+# ■ Interpreter - Быстрые команды для настройки анимаций (Shortcuts)
+#------------------------------------------------------------------------------
+# Вспомогательные методы для настройки спрайтов врагов и персонажей.
+# Используются в блоках «Выполнить скрипт» (Call Script) внутри событий.
+# Учтено ограничение поля скрипта в RMXP (37 символов на строку).
+#==============================================================================
+
+class Interpreter
+
+  #============================================================================
+  # :: se - Настройка анимаций для ТЕКУЩЕГО события
+  #--------------------------------------------------------------------------
+  # Применяет набор анимаций к персонажу текущего события (игрок или эвент).
+  # Не работает для врагов Blizz-ABS (Map_Enemy) — для них используйте se2().
+  #============================================================================
+  
+    def se(prefix, w = 128, h = 128)
+    event = get_character(0)
+    return unless event && event.respond_to?(:abs_sprite_config=)
+    event.abs_sprite_config ||= {} # Принудительная инициализация
+    c = event.abs_sprite_config
+    c[:frame_width]       = w
+    c[:frame_height]      = h
+    c[:idle]              = "#{prefix}idle_#{w}x#{h}"
+    c[:walk]              = "#{prefix}walk_#{w}x#{h}"
+    c[:run]               = "#{prefix}run_#{w}x#{h}"
+    c[:attack]            = "#{prefix}attack_#{w}x#{h}"
+    c[:block]             = "#{prefix}block_#{w}x#{h}"
+    c[:skill]             = "#{prefix}skill_#{w}x#{h}"
+    c[:death]             = "#{prefix}death_#{w}x#{h}"
+    c[:default_direction] = 6
+  end
+
+  def se3(id, prefix, dir = 4, w = nil, h = nil)
+    event = $game_map.events[id]
+    return unless event && event.respond_to?(:abs_sprite_config=)
+    
+    event.abs_sprite_config ||= {}
+    c = event.abs_sprite_config
+    
+    # Если размер указан явно — используем его и добавляем суффикс к именам
+    if w && h
+      c[:frame_width]  = w
+      c[:frame_height] = h
+      c[:idle]    = "#{prefix}idle_#{w}x#{h}"
+      c[:walk]    = "#{prefix}walk_#{w}x#{h}"
+      c[:attack]  = "#{prefix}attack_#{w}x#{h}"
+      c[:block]   = "#{prefix}block_#{w}x#{h}"
+      c[:skill]   = "#{prefix}magic_#{w}x#{h}"
+      c[:death]   = "#{prefix}death_#{w}x#{h}"
+    else
+      # Старое поведение — без суффикса, дефолтный размер
+      c[:idle]    = "#{prefix}idle"
+      c[:walk]    = "#{prefix}walk"
+      c[:attack]  = "#{prefix}attack"
+      c[:block]   = "#{prefix}block"
+      c[:skill]   = "#{prefix}magic"
+      c[:death]   = "#{prefix}death"
+    end
+    
+    c[:default_direction] = dir
+  end
+
+  def se2(event_id, prefix, w = 128, h = 128, dir = 6)
+    enemy = nil
+    if defined?(BlizzABS) && $BlizzABS && $BlizzABS.respond_to?(:battlers)
+      enemy = $BlizzABS.battlers.find { |b| b && b.respond_to?(:id) && b.id == event_id }
+    end
+    enemy ||= ($game_map.events[event_id] rescue nil)
+    
+    return unless enemy && enemy.respond_to?(:abs_sprite_config=)
+    enemy.abs_sprite_config ||= {} # Принудительная инициализация
+    c = enemy.abs_sprite_config
+    
+    c[:frame_width]       = w
+    c[:frame_height]      = h
+    c[:idle]              = "#{prefix}idle_#{w}x#{h}"
+    c[:walk]              = "#{prefix}walk_#{w}x#{h}"
+    c[:run]               = "#{prefix}run_#{w}x#{h}"
+    c[:attack]            = "#{prefix}attack_#{w}x#{h}"
+    c[:block]             = "#{prefix}block_#{w}x#{h}"
+    c[:skill]             = "#{prefix}skill_#{w}x#{h}"
+    c[:death]             = "#{prefix}death_#{w}x#{h}"
+    c[:default_direction] = dir
+  end
+end
+
+#==============================================================================
+# ■ Map_Enemy - Автоматическая настройка конфига по имени врага
+#------------------------------------------------------------------------------
+# При создании Map_Enemy автоматически определяет префикс и размер кадра
+# по имени врага из базы данных и заполняет abs_sprite_config.
+# Устраняет необходимость ручного вызова se2() для каждого врага.
+#==============================================================================
+
+if defined?(Map_Enemy)
+  class Map_Enemy
+
+    #==========================================================================
+    # :: Перехват метода initialize
+    #==========================================================================
+    
+    unless method_defined?(:abs_overlay_initialize_auto)
+      alias abs_overlay_initialize_auto initialize
+    end
+
+    def initialize(map_id, event, id = 0, *args)
+      # Передаем id обратно в *args, чтобы не нарушить цепочку алиасов
+      abs_overlay_initialize_auto(map_id, event, id, *args)
+      abs_overlay_auto_setup(id)
+    end
+
+    #==========================================================================
+    # :: Автоматическая настройка конфига
+    #--------------------------------------------------------------------------
+    # Заполняет abs_sprite_config на основе имени врага из $data_enemies.
+    #==========================================================================
+    
+           def abs_overlay_auto_setup(enemy_id)
+      return if enemy_id.to_i <= 0
+      
+      # ЯДЕРНАЯ ИНИЦИАЛИЗАЦИЯ
+      cfg = instance_variable_get(:@abs_sprite_config)
+      cfg = {} if cfg.nil? || !cfg.is_a?(Hash)
+      
+      # Не перезаписываем, если конфиг уже задан вручную
+      if cfg[:idle] && !cfg[:idle].to_s.empty?
+        instance_variable_set(:@abs_sprite_config, cfg)
+        return
+      end
+
+      enemy_data = $data_enemies[enemy_id] rescue nil
+      return if enemy_data.nil?
+
+      prefix = "#{enemy_data.name.to_s.gsub(' ', '')}_"
+
+      w, h = abs_overlay_detect_frame_size(prefix)
+      dir = abs_overlay_detect_direction(prefix, w, h)
+
+      cfg[:frame_width]       = w
+      cfg[:frame_height]      = h
+      cfg[:idle]              = "#{prefix}idle_#{w}x#{h}"
+      cfg[:walk]              = "#{prefix}walk_#{w}x#{h}"
+      cfg[:run]               = "#{prefix}run_#{w}x#{h}"
+      cfg[:attack]            = "#{prefix}attack_#{w}x#{h}"
+      cfg[:block]             = "#{prefix}block_#{w}x#{h}"
+      cfg[:skill]             = "#{prefix}skill_#{w}x#{h}"
+      cfg[:death]             = "#{prefix}death_#{w}x#{h}"
+      cfg[:default_direction] = dir
+
+      enemy_name_key = prefix.chomp('_')
+      if defined?(ABS_CustomOverlay::ENEMY_ANIMATION_SPEEDS)
+        speeds = ABS_CustomOverlay::ENEMY_ANIMATION_SPEEDS[enemy_name_key]
+        cfg[:animation_speeds] = speeds if speeds
+      end
+      
+      # Сохраняем обратно в объект
+      instance_variable_set(:@abs_sprite_config, cfg)
+    end
+
+    #==========================================================================
+    # :: Вспомогательные методы
+    #==========================================================================
+
+    # Определяет размер кадра путем поиска существующих файлов на диске
+    def abs_overlay_detect_frame_size(prefix)
+      candidates = [
+        [128, 128], [64, 64], [96, 96], [160, 160], [192, 192],
+        [256, 256], [284, 220], [320, 240], [400, 299]
+      ]
+
+      candidates.each do |w, h|
+        base_key = "#{prefix}idle_#{w}x#{h}"
+        # Проверяем одиночный файл или начало цепочки (_a)
+        if ABS_CustomOverlay.bitmap(base_key) || 
+           ABS_CustomOverlay.bitmap(ABS_CustomOverlay.chain_key(base_key, 0))
+          return [w, h]
+        end
+      end
+
+      # Фоллбек на глобальные настройки
+      [ABS_CustomOverlay::FRAME_WIDTH, ABS_CustomOverlay::FRAME_HEIGHT]
+    end
+
+    # Определяет направление спрайта по умолчанию
+    def abs_overlay_detect_direction(prefix, w, h)
+      # Словарь исключений для врагов, чей спрайт по умолчанию смотрит вправо (6)
+      exceptions = {
+        # "EnemyName" => 6
+      }
+      
+      name = prefix.chomp('_')
+      exceptions[name] || ABS_CustomOverlay::ENEMY_DEFAULT_DIRECTION
+    end
+
+  end
+end
+
+#==============================================================================
+# ■ Map_Battler - Перехват использования навыков (для всех батлеров)
+#------------------------------------------------------------------------------
+# Отслеживает использование навыков любыми батлерами (игрок, враги, союзники)
+# для запуска соответствующих оверлей-анимаций.
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+if defined?(Map_Battler)
+  class Map_Battler
+
+    #==========================================================================
+    # :: Перехват метода use_skill
+    #--------------------------------------------------------------------------
+    # Перехватывает вызов навыка, извлекает его ID и устанавливает флаг
+    # для системы оверлеев, если навык был успешно применен.
+    #==========================================================================
+    
+    if method_defined?(:use_skill) && !method_defined?(:abs_overlay_use_skill_all_original)
+      alias_method :abs_overlay_use_skill_all_original, :use_skill
+
+      def use_skill(*args)
+        skill_arg = args[0]
+        skill_id = 0
+
+        # Определение ID навыка из переданного аргумента
+        if defined?(RPG::Skill) && skill_arg.is_a?(RPG::Skill)
+          skill_id = skill_arg.id
+        elsif skill_arg
+          skill_id = skill_arg.to_i
+        end
+
+        # Вызов оригинального метода Blizz-ABS
+        result = abs_overlay_use_skill_all_original(*args)
+
+        # Установка флага анимации при успешном использовании навыка
+        if result != false && skill_id > 0
+          if defined?(ABS_OverlayFlags) && ABS_OverlayFlags.respond_to?(:set_skill)
+            ABS_OverlayFlags.set_skill(self, skill_id)
+          end
+        end
+
+        result
+      end
+    end
+
+  end
+end # if defined?(Map_Battler)
