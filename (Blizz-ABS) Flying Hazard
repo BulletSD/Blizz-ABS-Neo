@@ -1,0 +1,357 @@
+#==============================================================================
+# ■ ABS_FlyingHazard - Летящие опасные препятствия
+#------------------------------------------------------------------------------
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+module ABS_FlyingHazard
+  COLLISION_RADIUS      = 128
+  HIT_COOLDOWN          = 60
+  HIT_ANIMATION_ID      = 0
+  PLAYER_FLASH_DURATION = 20
+end
+
+#==============================================================================
+# ■ Game_FlyingHazard
+#==============================================================================
+
+class Game_FlyingHazard
+
+  attr_reader :event_id
+  attr_reader :active
+  attr_accessor :overlay_key
+  attr_accessor :frame_width
+  attr_accessor :frame_height
+  attr_accessor :damage
+  attr_accessor :knockback
+  attr_accessor :direction
+
+  def initialize(event_id, options)
+    options = {} if options.nil?
+
+    @event_id     = event_id
+    @map_id       = $game_map ? $game_map.map_id : 0
+    @active       = true
+    @hit_cooldown = 0
+
+    @damage     = options[:damage]    || 10
+    @knockback  = options[:knockback] || 0
+    @element_id = options[:element]   || 0
+
+    @overlay_key  = options[:overlay_key]  || ""
+    @frame_width  = options[:frame_width]  || ABS_CustomOverlay::FRAME_WIDTH
+    @frame_height = options[:frame_height] || ABS_CustomOverlay::FRAME_HEIGHT
+    @direction    = options[:direction]    || 6
+    @z_plus       = options[:z_plus]       || 200
+    @hit_anim     = options[:hit_anim]     || 0
+
+    setup_overlay_config
+  end
+
+  #============================================================================
+  # :: Настройка оверлей-конфига
+  #============================================================================
+
+  def setup_overlay_config
+    event = game_event
+    return unless event
+
+    c = event.abs_sprite_config
+    c[:frame_width]       = @frame_width
+    c[:frame_height]      = @frame_height
+    c[:default_direction] = @direction
+    c[:z_plus]            = @z_plus
+
+    unless @overlay_key.to_s.empty?
+      c[:idle]   = @overlay_key
+      c[:walk]   = @overlay_key
+      c[:run]    = @overlay_key
+      c[:attack] = @overlay_key
+    end
+  end
+
+  #============================================================================
+  # :: Гарантируем наличие конфига оверлея
+  #============================================================================
+
+  def ensure_overlay_config
+    event = game_event
+    return unless event
+
+    c = event.abs_sprite_config
+    if c[:idle].nil? || c[:idle].to_s.empty?
+      setup_overlay_config
+    end
+  end
+
+  #============================================================================
+  # :: Обновление
+  #============================================================================
+
+  def update
+    return unless @active
+
+    if $game_map && $game_map.map_id != @map_id
+      deactivate
+      return
+    end
+
+    ensure_overlay_config
+
+    @hit_cooldown -= 1 if @hit_cooldown > 0
+
+    check_player_collision
+  end
+
+  #============================================================================
+  # :: Проверка столкновения
+  #============================================================================
+
+  def check_player_collision
+    return if @hit_cooldown > 0
+    return unless $game_player
+
+    event = game_event
+    return unless event
+
+    dx = (event.real_x - $game_player.real_x).abs
+    dy = (event.real_y - $game_player.real_y).abs
+
+    if dx < ABS_FlyingHazard::COLLISION_RADIUS && dy < ABS_FlyingHazard::COLLISION_RADIUS
+      apply_damage_to_player(event)
+      @hit_cooldown = ABS_FlyingHazard::HIT_COOLDOWN
+    end
+  end
+
+  #============================================================================
+  # :: Нанесение урона
+  #============================================================================
+
+  def apply_damage_to_player(source_event)
+    actor = nil
+    begin
+      actor = $game_party.actors[0] if $game_party
+    rescue
+      actor = nil
+    end
+    return unless actor
+
+    raw_damage = calc_damage(actor)
+    raw_damage = [raw_damage, 1].max
+
+    actor.hp -= raw_damage
+    actor.hp  = 0 if actor.hp < 0
+
+    show_hit_effects(source_event, raw_damage)
+    apply_knockback if @knockback > 0
+    handle_player_death if actor.hp <= 0
+  end
+
+  #============================================================================
+  # :: Расчет урона
+  #============================================================================
+
+  def calc_damage(actor)
+    base = @damage.to_i
+
+    defense = 0
+    begin
+      defense = actor.pdef if actor.respond_to?(:pdef)
+    rescue
+      defense = 0
+    end
+
+    reduced = base - (defense / 4).to_i
+    reduced = [reduced, 1].max
+
+    if @element_id > 0
+      begin
+        if actor.respond_to?(:element_rate)
+          rate    = actor.element_rate(@element_id)
+          reduced = (reduced * rate / 100).to_i
+          reduced = [reduced, 0].max
+        end
+      rescue
+      end
+    end
+
+    reduced
+  end
+
+  #============================================================================
+  # :: Визуальные эффекты
+  #============================================================================
+
+  def show_hit_effects(source_event, damage)
+    if defined?(PopupManager) && PopupManager.respond_to?(:damage)
+      begin
+        PopupManager.damage($game_player, damage)
+      rescue
+      end
+    end
+
+    if $game_screen && ABS_FlyingHazard::PLAYER_FLASH_DURATION > 0
+      $game_screen.start_flash(
+        Color.new(255, 0, 0, 160),
+        ABS_FlyingHazard::PLAYER_FLASH_DURATION
+      )
+    end
+
+    anim_id = @hit_anim > 0 ? @hit_anim : ABS_FlyingHazard::HIT_ANIMATION_ID
+    $game_player.animation_id = anim_id if anim_id > 0
+  end
+
+  #============================================================================
+  # :: Отброс игрока
+  #============================================================================
+
+  def apply_knockback
+    return unless $game_player
+    event = game_event
+    return unless event
+
+    dx = $game_player.real_x - event.real_x
+    dy = $game_player.real_y - event.real_y
+
+    kx = dx > 0 ? 1 : (dx < 0 ? -1 : 0)
+    ky = dy > 0 ? 1 : (dy < 0 ? -1 : 0)
+
+    i = 0
+    while i < @knockback
+      if kx > 0
+        $game_player.move_right
+      elsif kx < 0
+        $game_player.move_left
+      elsif ky > 0
+        $game_player.move_down
+      elsif ky < 0
+        $game_player.move_up
+      end
+      i += 1
+    end
+  end
+
+  #============================================================================
+  # :: Смерть игрока
+  #============================================================================
+
+  def handle_player_death
+    begin
+      $game_temp.gameover = true if $game_temp && $game_temp.respond_to?(:gameover=)
+    rescue
+    end
+  end
+
+  #============================================================================
+  # :: Деактивация
+  #============================================================================
+
+  def deactivate
+    @active = false
+  end
+
+  #============================================================================
+  # :: Получение объекта события
+  #============================================================================
+
+  def game_event
+    return nil unless $game_map
+    return nil if $game_map.map_id != @map_id
+    $game_map.events[@event_id]
+  end
+
+end
+
+#==============================================================================
+# ■ Game_FlyingHazardManager
+#==============================================================================
+
+module Game_FlyingHazardManager
+
+  @hazards = []
+
+  def self.register(event_id, options)
+    options = {} if options.nil?
+    @hazards.delete_if { |h| h.event_id == event_id }
+    hazard = Game_FlyingHazard.new(event_id, options)
+    @hazards << hazard
+    hazard
+  end
+
+  def self.unregister(event_id)
+    target = nil
+    @hazards.each { |h| target = h if h.event_id == event_id }
+    target.deactivate if target
+    @hazards.delete_if { |h| h.event_id == event_id }
+  end
+
+  def self.update
+    @hazards.each { |h| h.update }
+    @hazards.delete_if { |h| !h.active }
+  end
+
+  def self.clear
+    @hazards.clear
+  end
+
+  def self.find(event_id)
+    result = nil
+    @hazards.each { |h| result = h if h.event_id == event_id }
+    result
+  end
+
+end
+
+#==============================================================================
+# ■ Scene_Map
+#==============================================================================
+
+class Scene_Map
+
+  unless method_defined?(:abs_hazard_update)
+    alias abs_hazard_update update
+  end
+
+  def update
+    Game_FlyingHazardManager.update
+    abs_hazard_update
+  end
+
+  unless method_defined?(:abs_hazard_main)
+    alias abs_hazard_main main
+  end
+
+  def main
+    Game_FlyingHazardManager.clear
+    abs_hazard_main
+    Game_FlyingHazardManager.clear
+  end
+
+end
+
+#==============================================================================
+# ■ Interpreter
+#==============================================================================
+
+class Interpreter
+
+  def register_hazard(event_id, options)
+    options = {} if options.nil?
+    Game_FlyingHazardManager.register(event_id, options)
+  end
+
+  def hazard(event_id, options)
+    options = {} if options.nil?
+    register_hazard(event_id, options)
+  end
+
+  def remove_hazard(event_id)
+    Game_FlyingHazardManager.unregister(event_id)
+  end
+
+  def hazard_active?(event_id)
+    h = Game_FlyingHazardManager.find(event_id)
+    h ? h.active : false
+  end
+
+end
