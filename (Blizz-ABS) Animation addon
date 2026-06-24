@@ -1523,6 +1523,18 @@ if defined?(Control_Sprite_Character)
         if force_no_loop
           if @abs_overlay_current_frame < (@abs_overlay_total_frames - 1)
             @abs_overlay_current_frame += 1
+            
+            if animation_type == :death &&
+               @abs_overlay_current_frame == (
+               @abs_overlay_total_frames - 1)
+              @abs_death_animation_complete = true
+              if @character
+                @character.instance_variable_set(
+                  :@abs_death_animation_complete,
+                  true)
+              end
+            end
+            
           else
             if @abs_chain_enabled
               next_segment = @abs_chain_segment + 1
@@ -2283,7 +2295,8 @@ if target_class
       enemy.start if enemy.trigger == BlizzABS::CETDeath
 
       # Удаление события с карты
-      $game_map.events.delete(enemy.id)
+      $game_map.events.delete(enemy.id) unless enemy.execute
+      return if enemy.execute
 
       # Сбор выпадающих предметов
       items = drop_items(enemy)
