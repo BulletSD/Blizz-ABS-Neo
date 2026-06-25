@@ -1,0 +1,1688 @@
+#==============================================================================
+# ■ Blizz-ABS Party HUD
+#------------------------------------------------------------------------------
+#  Авторы: Winkio, Dark Rise Inc.
+#  Версия: 1.3
+#------------------------------------------------------------------------------
+#  Этот скрипт модифицирует HUD системы Blizz-ABS для отображения HP/SP
+#  до шести членов группы одновременно.
+#
+#  ТРЕБОВАНИЯ: Blizz-ABS v2.7 или выше
+#==============================================================================
+
+#==============================================================================
+# ■ PARHUD_CONFIG
+#------------------------------------------------------------------------------
+#  Модуль конфигурации Party HUD
+#==============================================================================
+module PARHUD_CONFIG
+  #==========================================================================
+  # ● ОСНОВНЫЕ НАСТРОЙКИ
+  #==========================================================================
+  
+  # Сохранять цвет полосы HP одинаковым независимо от количества HP
+  COLOR_FIX = false
+  
+  # Центрировать отображение HUD
+  CENTER_DISPLAY = false
+  
+  # Отображать фейссеты персонажей
+  # true  = максимум 4 члена группы
+  # false = максимум 6 членов группы
+  FACESETS = false
+  
+  # Отображать название карты в HUD
+  MAPNAME = false
+  
+  # Разрешить полноэкранный режим миникарты
+  MINIMAP_FULLSCREEN = false
+  
+  #==========================================================================
+  # ● НАСТРОЙКИ ФОНА
+  #==========================================================================
+  
+  # Фоновое изображение HUD (из папки Pictures)
+  # Оставьте "" для отсутствия фона
+  BGTOP = "HUD"
+  
+  # Ширина фонового изображения HUD
+  HUD_WIDTH = 256
+  
+  # Высота фонового изображения HUD
+  HUD_HEIGHT = 120
+  
+  # Отступ от верха экрана (0-14)
+  TOPSPACE = 10
+  
+  #==========================================================================
+  # ● НАСТРОЙКИ ПОЛОСОК HP/SP
+  #==========================================================================
+  
+  # Размеры полоски HP
+  HP_BAR_WIDTH = 121
+  HP_BAR_HEIGHT = 9
+  
+  # Размеры полоски SP
+  SP_BAR_WIDTH = 121
+  BAR_HEIGHT = 9
+  
+  # Размер шрифта для текста HP/SP
+  HP_SP_FONT_SIZE = 10
+  
+  # Смещение текста HP/SP относительно полоски
+  HP_SP_TEXT_OFFSET_X = -42
+  HP_SP_TEXT_OFFSET_Y = 1
+  
+  #==========================================================================
+  # ● НАСТРОЙКИ РАСПРЕДЕЛЕНИЯ ЭЛЕМЕНТОВ
+  #==========================================================================
+  
+  # Ширина области для распределения элементов
+  PARTY_DISTRIBUTION_AREA_WIDTH = 640
+  
+  # Смещение для центрирования
+  PARTY_DISTRIBUTION_CENTER_OFFSET = 320
+  
+  #==========================================================================
+  # ● СМЕЩЕНИЯ ДЛЯ ФИКСИРОВАННОГО РЕЖИМА (!CENTER_DISPLAY)
+  #==========================================================================
+  
+  # Базовое смещение X
+  XDAT_OFFSET_FACESETS_FIXED = -25
+  XDAT_OFFSET_NO_FACESETS_FIXED = -56
+  
+  # Смещения элементов по X
+  NAME_OFFSET_X_FIXED = -227
+  FACE_OFFSET_X_FIXED = -280
+  HP_BAR_OFFSET_X_FIXED = -182
+  SP_BAR_OFFSET_X_FIXED = -182
+  
+  # Смещения элементов по Y
+  NAME_OFFSET_Y_FIXED = -16
+  FACE_OFFSET_Y_FIXED = 0
+  HP_BAR_OFFSET_Y_FIXED = 59
+  SP_BAR_OFFSET_Y_FIXED = 71
+  
+  #==========================================================================
+  # ● СМЕЩЕНИЯ ДЛЯ ЦЕНТРИРОВАННОГО РЕЖИМА (CENTER_DISPLAY)
+  #==========================================================================
+  
+  # Базовое смещение X
+  XDAT_OFFSET_FACESETS_CENTERED = -25
+  XDAT_OFFSET_NO_FACESETS_CENTERED = -56
+  
+  # Смещения элементов по X
+  NAME_OFFSET_X_CENTERED = 0
+  FACE_OFFSET_X_CENTERED = -52
+  HP_BAR_OFFSET_X_CENTERED = 0
+  SP_BAR_OFFSET_X_CENTERED = 0
+  
+  # Смещения элементов по Y
+  NAME_OFFSET_Y_CENTERED = 0
+  FACE_OFFSET_Y_CENTERED = 0
+  HP_BAR_OFFSET_Y_CENTERED = 16
+  SP_BAR_OFFSET_Y_CENTERED = 33
+end
+
+#==============================================================================
+# ■ Game_System
+#------------------------------------------------------------------------------
+#  Расширение для поддержки Party HUD
+#==============================================================================
+class Game_System
+  attr_accessor :parhud
+  
+  alias parhud_initialize initialize
+  def initialize
+    parhud_initialize
+    @parhud = true
+  end
+end
+
+#==============================================================================
+# ■ Scene_Title
+#------------------------------------------------------------------------------
+#  Загрузка информации о картах
+#==============================================================================
+class Scene_Title
+  alias parhud_main main
+  def main
+    load_map_infos
+    parhud_main
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Загрузка названий карт
+  #--------------------------------------------------------------------------
+  def load_map_infos
+    $map_infos = load_data('Data/MapInfos.rxdata')
+    if $map_infos.nil?
+      $map_infos = {}
+    else
+      $map_infos.keys.each { |key| $map_infos[key] = $map_infos[key].name }
+    end
+  end
+end
+
+#==============================================================================
+# ■ Game_Map
+#------------------------------------------------------------------------------
+#  Добавление метода получения имени карты
+#==============================================================================
+class Game_Map
+  #--------------------------------------------------------------------------
+  # ● Получение названия текущей карты
+  #--------------------------------------------------------------------------
+  def name
+    return '' if $map_infos.nil?
+    return $map_infos[@map_id] || ''
+  end
+end
+
+#==============================================================================
+# ■ ParHud
+#------------------------------------------------------------------------------
+#  Верхний HUD, отображающий HP/SP всех членов группы
+#==============================================================================
+class ParHud < Sprite
+  #==========================================================================
+  # ● КОНСТАНТЫ
+  #==========================================================================
+  MAX_PARTY_DISPLAY = 6
+  
+  #--------------------------------------------------------------------------
+  # ● Инициализация
+  #--------------------------------------------------------------------------
+  def initialize(viewport = nil)
+    super
+    create_positions
+    create_bitmap
+    setup_font
+    initialize_variables
+    draw_basic
+    update
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание битмапа
+  #--------------------------------------------------------------------------
+  def create_bitmap
+    self.bitmap = Bitmap.new(640, 145 + PARHUD_CONFIG::TOPSPACE)
+    self.z = 1000
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Настройка шрифта
+  #--------------------------------------------------------------------------
+  def setup_font
+    self.bitmap.font.name = 'Verdana'
+    self.bitmap.font.size = 12
+    self.bitmap.font.bold = true
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Инициализация переменных
+  #--------------------------------------------------------------------------
+  def initialize_variables
+    @psize = $game_party.actors.size
+    @poffset = 0
+    test_offset
+    @hp = [0, 0, 0, 0, 0, 0]
+    @maxhp = [0, 0, 0, 0, 0, 0]
+    @sp = [0, 0, 0, 0, 0, 0]
+    @maxsp = [0, 0, 0, 0, 0, 0]
+    @empty_hud_drawn = false
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание массивов позиций
+  #--------------------------------------------------------------------------
+  def create_positions
+    @name_x = []
+    @name_y = []
+    @hp_x = []
+    @hp_y = []
+    @sp_x = []
+    @sp_y = []
+    
+    if PARHUD_CONFIG::FACESETS
+      @face_x = []
+      @face_y = []
+    end
+    
+    if PARHUD_CONFIG::CENTER_DISPLAY
+      create_centered_positions
+    else
+      create_fixed_positions
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание позиций для фиксированного режима
+  #--------------------------------------------------------------------------
+  def create_fixed_positions
+    @maxpsize = BlizzABS::Config::MAX_PARTY
+    
+    for i in 0...@maxpsize
+      xdat = calculate_xdat_fixed(i)
+      
+      if PARHUD_CONFIG::FACESETS
+        @face_x.push(xdat + PARHUD_CONFIG::FACE_OFFSET_X_FIXED)
+        @face_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::FACE_OFFSET_Y_FIXED)
+      end
+      
+      @name_x.push(xdat + PARHUD_CONFIG::NAME_OFFSET_X_FIXED)
+      @name_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::NAME_OFFSET_Y_FIXED)
+      
+      @hp_x.push(xdat + PARHUD_CONFIG::HP_BAR_OFFSET_X_FIXED)
+      @hp_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::HP_BAR_OFFSET_Y_FIXED)
+      
+      @sp_x.push(xdat + PARHUD_CONFIG::SP_BAR_OFFSET_X_FIXED)
+      @sp_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::SP_BAR_OFFSET_Y_FIXED)
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Расчёт базовой X-координаты для фиксированного режима
+  #--------------------------------------------------------------------------
+  def calculate_xdat_fixed(index)
+    if PARHUD_CONFIG::FACESETS
+      offset = PARHUD_CONFIG::XDAT_OFFSET_FACESETS_FIXED
+    else
+      offset = PARHUD_CONFIG::XDAT_OFFSET_NO_FACESETS_FIXED
+    end
+    
+    return index * PARHUD_CONFIG::PARTY_DISTRIBUTION_AREA_WIDTH / @maxpsize +
+           PARHUD_CONFIG::PARTY_DISTRIBUTION_CENTER_OFFSET / @maxpsize + offset
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание позиций для центрированного режима
+  #--------------------------------------------------------------------------
+  def create_centered_positions
+    @psize = $game_party.actors.size if @psize.nil?
+    
+    for i in 0...@psize
+      xdat = calculate_xdat_centered(i)
+      
+      if PARHUD_CONFIG::FACESETS
+        @face_x.push(xdat + PARHUD_CONFIG::FACE_OFFSET_X_CENTERED)
+        @face_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::FACE_OFFSET_Y_CENTERED)
+      end
+      
+      @name_x.push(xdat + PARHUD_CONFIG::NAME_OFFSET_X_CENTERED)
+      @name_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::NAME_OFFSET_Y_CENTERED)
+      
+      @hp_x.push(xdat + PARHUD_CONFIG::HP_BAR_OFFSET_X_CENTERED)
+      @hp_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::HP_BAR_OFFSET_Y_CENTERED)
+      
+      @sp_x.push(xdat + PARHUD_CONFIG::SP_BAR_OFFSET_X_CENTERED)
+      @sp_y.push(PARHUD_CONFIG::TOPSPACE + PARHUD_CONFIG::SP_BAR_OFFSET_Y_CENTERED)
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Расчёт базовой X-координаты для центрированного режима
+  #--------------------------------------------------------------------------
+  def calculate_xdat_centered(index)
+    if PARHUD_CONFIG::FACESETS
+      offset = PARHUD_CONFIG::XDAT_OFFSET_FACESETS_CENTERED
+    else
+      offset = PARHUD_CONFIG::XDAT_OFFSET_NO_FACESETS_CENTERED
+    end
+    
+    return index * PARHUD_CONFIG::PARTY_DISTRIBUTION_AREA_WIDTH / @psize +
+           PARHUD_CONFIG::PARTY_DISTRIBUTION_CENTER_OFFSET / @psize + offset
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка базового HUD
+  #--------------------------------------------------------------------------
+  def draw_basic
+    self.bitmap.font.size = 12
+    
+    # Отрисовка фона
+    draw_background
+    
+    # Отрисовка элементов для каждого члена группы
+    self.bitmap.font.color = Color.new(255, 255, 255)
+    color = Color.new(255, 255, 255, 127)
+    
+    for i in 0...@psize
+      draw_actor_name(i)
+      draw_actor_face(i, color) if PARHUD_CONFIG::FACESETS
+    end
+    
+    self.bitmap.font.size = 12
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка фона
+  #--------------------------------------------------------------------------
+  def draw_background
+    if PARHUD_CONFIG::BGTOP != ""
+      begin
+        bitmap = RPG::Cache.picture(PARHUD_CONFIG::BGTOP)
+        self.bitmap.blt(0, 0, bitmap, 
+          Rect.new(0, 0, PARHUD_CONFIG::HUD_WIDTH, PARHUD_CONFIG::HUD_HEIGHT))
+      rescue
+        # Фоновое изображение не найдено
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка имени актора
+  #--------------------------------------------------------------------------
+  def draw_actor_name(index)
+    return if actor(index).nil?
+    self.bitmap.draw_text_full(@name_x[index], @name_y[index], 128, 142, 
+                                actor(index).name, 1)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка фейссета актора
+  #--------------------------------------------------------------------------
+  def draw_actor_face(index, color)
+    return if actor(index).nil?
+    
+    self.bitmap.fill_rect(@face_x[index], @face_y[index], 50, 56, color)
+    
+    begin
+      bitmap = RPG::Cache.picture("actor" + actor(index).id.to_s + ".png")
+      self.bitmap.blt(@face_x[index] + 1, @face_y[index] + 1, bitmap, 
+                      Rect.new(0, 0, 50, 56))
+    rescue
+      # Фейссет не найден
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка пустого HUD
+  #--------------------------------------------------------------------------
+  def draw_empty
+    self.bitmap.font.color = disabled_color
+    
+    for i in 0...@psize
+      self.bitmap.gradient_bar_hud(@hp_x[i], @hp_y[i], 100, 0, 'hud_green_bar')
+      self.bitmap.gradient_bar_hud(@sp_x[i], @sp_y[i], 100, 0, 'hud_blue_bar')
+      self.bitmap.draw_text_full(@hp_x[i] + 48, @hp_y[i] - 3, 48, 20, '0', 2)
+      self.bitmap.draw_text_full(@sp_x[i] + 48, @sp_y[i] - 3, 48, 20, '0', 2)
+    end
+    
+    @hp = nil
+    @sp = nil
+    @maxhp = nil
+    @maxsp = nil
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка HP
+  #--------------------------------------------------------------------------
+  def draw_hp
+    @hp = []
+    @maxhp = []
+    
+    self.bitmap.font.color = normal_color
+    self.bitmap.font.size = PARHUD_CONFIG::HP_SP_FONT_SIZE
+    
+    for i in 0...@psize
+      @hp.push(actor(i).hp)
+      @maxhp.push(actor(i).maxhp)
+      
+      rate = (@maxhp[i] > 0 ? @hp[i].to_f / @maxhp[i] : 0)
+      bar_width = PARHUD_CONFIG::HP_BAR_WIDTH
+      
+      if PARHUD_CONFIG::COLOR_FIX
+        draw_hp_bar_fixed_color(i, rate, bar_width)
+      else
+        draw_hp_bar_dynamic_color(i, rate, bar_width)
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка полоски HP с фиксированным цветом
+  #--------------------------------------------------------------------------
+  def draw_hp_bar_fixed_color(index, rate, bar_width)
+    self.bitmap.gradient_bar_hud(@hp_x[index], @hp_y[index], bar_width, 
+                                  rate, 'hud_green_bar', 0)
+    self.bitmap.draw_text_full(@hp_x[index] + 1, @hp_y[index], 
+                                bar_width, PARHUD_CONFIG::BAR_HEIGHT, 
+                                @hp[index].to_s, 1)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка полоски HP с динамическим цветом
+  #--------------------------------------------------------------------------
+  def draw_hp_bar_dynamic_color(index, rate, bar_width)
+    self.bitmap.gradient_bar_hud(@hp_x[index], @hp_y[index], bar_width, 
+                                  rate, 'hud_green_bar', 1)
+    
+    # Определение цвета в зависимости от HP
+    if @hp[index] == 0
+      self.bitmap.font.color = knockout_color
+    elsif @hp[index] <= @maxhp[index] / 4
+      self.bitmap.font.color = crisis_color
+    else
+      self.bitmap.font.color = normal_color
+    end
+    
+    self.bitmap.draw_text_full(
+      @hp_x[index] + PARHUD_CONFIG::HP_SP_TEXT_OFFSET_X,
+      @hp_y[index] + PARHUD_CONFIG::HP_SP_TEXT_OFFSET_Y,
+      bar_width, PARHUD_CONFIG::BAR_HEIGHT,
+      @hp[index].to_s, 1
+    )
+    
+    self.bitmap.font.color = normal_color
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка SP
+  #--------------------------------------------------------------------------
+  def draw_sp
+    @sp = []
+    @maxsp = []
+    
+    self.bitmap.font.color = normal_color
+    self.bitmap.font.size = PARHUD_CONFIG::HP_SP_FONT_SIZE
+    
+    for i in 0...@psize
+      @sp.push(actor(i).sp)
+      @maxsp.push(actor(i).maxsp)
+      
+      rate = (@maxsp[i] > 0 ? @sp[i].to_f / @maxsp[i] : 0)
+      bar_width = PARHUD_CONFIG::SP_BAR_WIDTH
+      
+      self.bitmap.gradient_bar_hud(@sp_x[i], @sp_y[i], bar_width, 
+                                    rate, 'hud_blue_bar', 0)
+      
+      self.bitmap.draw_text_full(
+        @sp_x[i] + PARHUD_CONFIG::HP_SP_TEXT_OFFSET_X,
+        @sp_y[i] + PARHUD_CONFIG::HP_SP_TEXT_OFFSET_Y,
+        bar_width, PARHUD_CONFIG::BAR_HEIGHT,
+        @sp[i].to_s, 1
+      )
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление
+  #--------------------------------------------------------------------------
+  def update
+    if actor.nil?
+      update_empty_hud
+    else
+      update_active_hud
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление пустого HUD
+  #--------------------------------------------------------------------------
+  def update_empty_hud
+    return if @empty_hud_drawn
+    
+    draw_basic
+    draw_empty
+    @empty_hud_drawn = true
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление активного HUD
+  #--------------------------------------------------------------------------
+  def update_active_hud
+    # Проверка изменения размера группы
+    if @psize != $game_party.actors.size
+      @psize = $game_party.actors.size
+      self.bitmap.clear
+      create_positions
+      test_offset
+      draw_basic
+    end
+    
+    # Обновление данных
+    if $game_temp.hud_refresh
+      draw_hp
+      draw_sp
+      $game_temp.hud_refresh = nil
+    else
+      test_offset
+      test_hp
+      test_sp
+    end
+    
+    @empty_hud_drawn = false
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка и отрисовка HP
+  #--------------------------------------------------------------------------
+  def test_hp
+    for i in 0...@psize
+      if actor(i).hp != @hp[i] || actor(i).maxhp != @maxhp[i]
+        draw_hp
+        return
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка и отрисовка SP
+  #--------------------------------------------------------------------------
+  def test_sp
+    for i in 0...@psize
+      if actor(i).sp != @sp[i] || actor(i).maxsp != @maxsp[i]
+        draw_sp
+        return
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка смещения
+  #--------------------------------------------------------------------------
+  def test_offset
+    for i in 0...@psize
+      if actor(0).name != $game_actors[1].name
+        @poffset = (@poffset + 1) % @psize
+      else
+        return
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Получение актора
+  #--------------------------------------------------------------------------
+  def actor(id = 0)
+    return $game_party.actors[(id + @poffset) % @psize]
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Освобождение ресурсов
+  #--------------------------------------------------------------------------
+  def dispose
+    self.bitmap.dispose if self.bitmap
+    super
+  end
+end
+
+#==============================================================================
+# ■ Hud
+#------------------------------------------------------------------------------
+#  Основной HUD с отображением уровня, золота, навыков и предметов
+#==============================================================================
+class Hud < Sprite
+  #--------------------------------------------------------------------------
+  # ● Инициализация
+  #--------------------------------------------------------------------------
+  def initialize(viewport = nil)
+    super
+    create_positions
+    create_bitmap
+    setup_font
+    draw_basic
+    update
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание битмапа
+  #--------------------------------------------------------------------------
+  def create_bitmap
+    self.bitmap = Bitmap.new(1, 1)
+    self.x = @hud_x
+    self.y = @hud_y
+    self.z = 1000
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Настройка шрифта
+  #--------------------------------------------------------------------------
+  def setup_font
+    self.bitmap.font.name = 'Verdana'
+    self.bitmap.font.size = 14
+    self.bitmap.font.bold = true
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание позиций
+  #--------------------------------------------------------------------------
+  def create_positions
+    @hud_height = 90
+    @hud_width = 120
+    @hud_x = 0
+    @hud_y = 390
+    @level_x = 0
+    @level_y = 0
+    @gold_x = 10
+    @gold_y = 20
+    @loc_x = 10
+    @loc_y = 40
+    @sbar_x = 65
+    @sbar_y = 60
+    
+    unless BlizzABS::Config::DIRECT_HOTKEYS
+      @hot_x = 4
+      @hot_y = 60
+      @left_x = 4
+      @left_y = 74
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка базового HUD
+  #--------------------------------------------------------------------------
+  def draw_basic
+    # Фон
+    self.bitmap.fill_rect(0, 0, @hud_width, @hud_height, Color.new(0, 0, 0, 127))
+    
+    # Контур полосы уровня
+    color = Color.new(255, 255, 255, 127)
+    self.bitmap.fill_rect(@level_x, @level_y, 120, 14, color)
+    
+    # Метки горячих клавиш
+    unless BlizzABS::Config::DIRECT_HOTKEYS
+      self.bitmap.draw_text_full(@hot_x, @hot_y, 48, 20, 'S')
+      self.bitmap.draw_text_full(@hot_x + 60, @hot_y, 48, 20, 'I')
+    end
+    
+    # Метка золота
+    self.bitmap.font.color = system_color
+    self.bitmap.draw_text_full(@gold_x + 80, @gold_y, 20, 20, 'G')
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка пустого HUD
+  #--------------------------------------------------------------------------
+  def draw_empty
+    self.bitmap.gradient_bar_hud(@level_x + 1, @level_y + 1, 118, 'hud_white_bar', 1)
+    self.bitmap.font.color = disabled_color
+    self.bitmap.draw_text_full(@level_x, @level_y, 118, 11, '0', 1)
+    @name = nil
+    @level = nil
+    @hp = nil
+    @sp = nil
+    @maxhp = nil
+    @maxsp = nil
+    @exp = nil
+    @states = nil
+    @skill = nil
+    @skills_left = nil
+    @item = nil
+    @items_left = nil
+    @gold = nil
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка EXP
+  #--------------------------------------------------------------------------
+  def draw_exp
+    @exp = actor.exp
+    @level = actor.level
+    
+    rate = (actor.next_exp != 0 ? actor.now_exp.to_f / actor.next_exp : 1)
+    
+    self.bitmap.gradient_bar_hud(@level_x, @level_y, 118, rate, 'hud_white_bar', 2)
+    self.bitmap.font.color = normal_color
+    self.bitmap.font.size = 14
+    self.bitmap.draw_text_full(@level_x, @level_y - 3, 118, 20, 
+                                'Level ' + @level.to_s, 1)
+    self.bitmap.font.size = 16
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка золота
+  #--------------------------------------------------------------------------
+  def draw_gold
+    @gold = $game_party.gold
+    self.bitmap.fill_rect(@gold_x, @gold_y, 80, 20, Color.new(0, 0, 0, 127))
+    self.bitmap.font.color = normal_color
+    self.bitmap.draw_text_full(@gold_x, @gold_y, 80, 20, $game_party.gold.to_s, 2)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка местоположения
+  #--------------------------------------------------------------------------
+  def draw_loc
+    @loc = $game_map.name
+    self.bitmap.fill_rect(@loc_x, @loc_y, 100, 20, Color.new(0, 0, 0, 127))
+    self.bitmap.font.color = normal_color
+    self.bitmap.draw_text_full(@loc_x, @loc_y, 100, 20, $game_map.name, 1)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка горячей клавиши навыка
+  #--------------------------------------------------------------------------
+  def draw_hskill
+    @skill = actor.skill
+    self.bitmap.fill_rect(@hot_x + 28, @hot_y + 4, 24, 24, Color.new(0, 0, 0, 128))
+    
+    if @skill != 0
+      begin
+        bitmap = RPG::Cache.icon($data_skills[@skill].icon_name)
+        self.bitmap.blt(@hot_x + 28, @hot_y + 4, bitmap, Rect.new(0, 0, 24, 24))
+      rescue
+        # Иконка не найдена
+      end
+    end
+    
+    draw_lskill
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка оставшихся использований навыка
+  #--------------------------------------------------------------------------
+  def draw_lskill
+    self.bitmap.fill_rect(@left_x, @left_y + 4, 24, 16, Color.new(0, 0, 0, 128))
+    @skills_left = get_skills_left
+    
+    return if @skill.nil? || @skill <= 0
+    
+    if @skills_left >= 0
+      # Обычная стоимость SP
+      if @skills_left == 0
+        self.bitmap.font.color = Color.new(255, 0, 0)
+      elsif @skills_left <= 5
+        self.bitmap.font.color = Color.new(255, 255, 0)
+      else
+        self.bitmap.font.color = normal_color
+      end
+      
+      self.bitmap.font.size -= 2
+      self.bitmap.draw_text_full(@left_x, @left_y, 24, 20, @skills_left.to_s, 1)
+      self.bitmap.font.size += 2
+      
+    elsif @skills_left == -1
+      # Бесконечное использование
+      self.bitmap.font.color = Color.new(0, 255, 0)
+      self.bitmap.font.size += 4
+      self.bitmap.draw_text_full(@left_x, @left_y, 24, 20, '∞', 1)
+      self.bitmap.font.size -= 4
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Получение оставшихся использований навыка
+  #--------------------------------------------------------------------------
+  def get_skills_left
+    return -2 if @skill.nil? || @skill <= 0
+    
+    if $data_skills[@skill].sp_cost > 0
+      sp_cost = $data_skills[@skill].sp_cost
+      
+      # Проверка модификатора стоимости SP
+      if $tons_version != nil && $tons_version >= 6.54 && $game_system.SP_COST_MOD
+        sp_cost = BlizzCFG.get_cost_mod(actor.states, sp_cost)
+      end
+      
+      return -1 if sp_cost == 0
+      return actor.sp / sp_cost
+    end
+    
+    return -1
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка горячей клавиши предмета
+  #--------------------------------------------------------------------------
+  def draw_hitem
+    @item = actor.item
+    self.bitmap.fill_rect(@hot_x + 88, @hot_y + 4, 24, 24, Color.new(0, 0, 0, 128))
+    
+    if @item != 0
+      begin
+        bitmap = RPG::Cache.icon($data_items[@item].icon_name)
+        self.bitmap.blt(@hot_x + 88, @hot_y + 4, bitmap, Rect.new(0, 0, 24, 24))
+      rescue
+        # Иконка не найдена
+      end
+    end
+    
+    draw_litem
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка оставшихся предметов
+  #--------------------------------------------------------------------------
+  def draw_litem
+    @items_left = $game_party.item_number(@item)
+    self.bitmap.fill_rect(@left_x + 60, @left_y + 4, 24, 16, Color.new(0, 0, 0, 128))
+    
+    return if @item.nil? || @item <= 0
+    
+    # Проверка на нерасходуемый предмет
+    if $data_items[@item] != nil && !$data_items[@item].consumable
+      self.bitmap.font.color = Color.new(0, 255, 0)
+      self.bitmap.font.size += 4
+      self.bitmap.draw_text_full(@left_x + 60, @left_y, 24, 20, '∞', 1)
+      self.bitmap.font.size -= 4
+    else
+      # Расходуемый предмет
+      if @items_left == 0
+        self.bitmap.font.color = Color.new(255, 0, 0)
+      elsif @items_left <= 10
+        self.bitmap.font.color = Color.new(255, 255, 0)
+      else
+        self.bitmap.font.color = normal_color
+      end
+      
+      self.bitmap.font.size -= 2
+      self.bitmap.draw_text_full(@left_x + 60, @left_y, 24, 20, @items_left.to_s, 1)
+      self.bitmap.font.size += 2
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление
+  #--------------------------------------------------------------------------
+  def update
+    if actor.nil?
+      update_empty_hud
+    else
+      update_active_hud
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление пустого HUD
+  #--------------------------------------------------------------------------
+  def update_empty_hud
+    return if @empty_hud_drawn
+    
+    draw_basic
+    draw_empty
+    @empty_hud_drawn = true
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление активного HUD
+  #--------------------------------------------------------------------------
+  def update_active_hud
+    if $game_temp.hud_refresh
+      draw_exp
+      draw_gold
+      draw_loc if PARHUD_CONFIG::MAPNAME
+      
+      unless BlizzABS::Config::DIRECT_HOTKEYS
+        draw_hskill
+        draw_lskill
+        draw_hitem
+        draw_litem
+      end
+      
+      $game_temp.hud_refresh = nil
+    else
+      test_exp
+      test_gold
+      test_loc if PARHUD_CONFIG::MAPNAME
+      
+      unless BlizzABS::Config::DIRECT_HOTKEYS
+        test_hskill
+        test_lskill
+        test_hitem
+        test_litem
+      end
+    end
+    
+    @empty_hud_drawn = false
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка EXP
+  #--------------------------------------------------------------------------
+  def test_exp
+    draw_exp if actor.exp != @exp
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка золота
+  #--------------------------------------------------------------------------
+  def test_gold
+    draw_gold if $game_party.gold != @gold
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка местоположения
+  #--------------------------------------------------------------------------
+  def test_loc
+    draw_loc if $game_map.name != @loc
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка горячей клавиши навыка
+  #--------------------------------------------------------------------------
+  def test_hskill
+    draw_hskill if actor.skill != @skill
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка оставшихся использований навыка
+  #--------------------------------------------------------------------------
+  def test_lskill
+    draw_lskill if get_skills_left != @skills_left
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка горячей клавиши предмета
+  #--------------------------------------------------------------------------
+  def test_hitem
+    draw_hitem if actor.item != @item
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка оставшихся предметов
+  #--------------------------------------------------------------------------
+  def test_litem
+    draw_litem if $game_party.item_number(@item) != @items_left
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Получение актора
+  #--------------------------------------------------------------------------
+  def actor
+    return $game_player.battler
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Освобождение ресурсов
+  #--------------------------------------------------------------------------
+  def dispose
+    @parhud = nil
+    super
+  end
+end
+
+#==============================================================================
+# ■ Hotkey_Assignment
+#------------------------------------------------------------------------------
+#  Отображение назначенных горячих клавиш
+#==============================================================================
+class Hotkey_Assignment < Sprite
+  #--------------------------------------------------------------------------
+  # ● Инициализация
+  #--------------------------------------------------------------------------
+  def initialize(viewport = nil)
+    super
+    create_bitmap
+    setup_font
+    initialize_variables
+    update
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание битмапа
+  #--------------------------------------------------------------------------
+  def create_bitmap
+    self.bitmap = Bitmap.new(320, 32)
+    self.x = 160
+    self.y = 448
+    self.z = 1100
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Настройка шрифта
+  #--------------------------------------------------------------------------
+  def setup_font
+    self.bitmap.font.bold = true
+    self.bitmap.font.size -= 8
+    self.bitmap.font.color = system_color
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Инициализация переменных
+  #--------------------------------------------------------------------------
+  def initialize_variables
+    @page = 1
+    @skills = BlizzABS::Cache::EmptyKeys
+    @items = BlizzABS::Cache::EmptyKeys
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка горячих клавиш
+  #--------------------------------------------------------------------------
+  def draw(index = nil)
+    range = (index.nil? ? BlizzABS::Cache::HotkeyRange : [index])
+    
+    range.each do |i|
+      object = nil
+      
+      if $game_player.skill_hotkeys[i % 10] != 0
+        object = $data_skills[$game_player.skill_hotkeys[i % 10]]
+      elsif $game_player.item_hotkeys[i % 10] != 0
+        object = $data_items[$game_player.item_hotkeys[i % 10]]
+      end
+      
+      # Проверка изменений
+      if @items[i % 10] != $game_player.item_hotkeys[i % 10] ||
+         @skills[i % 10] != $game_player.skill_hotkeys[i % 10]
+        
+        # Очистка области
+        self.bitmap.fill_rect(32 * (i - 1), 0, 32, 32, Color.new(0, 0, 0, 0))
+        self.bitmap.fill_rect(32 * (i - 1) + 4, 4, 24, 24, Color.new(0, 0, 0, 128))
+        
+        # Отрисовка иконки
+        if object != nil
+          begin
+            bitmap = RPG::Cache.icon(object.icon_name)
+            self.bitmap.blt(32 * (i - 1) + 4, 4, bitmap, Rect.new(0, 0, 24, 24))
+          rescue
+            # Иконка не найдена
+          end
+        end
+        
+        # Отрисовка номера
+        self.bitmap.draw_text_full(32 * (i - 1), 10, 30, 32, (i % 10).to_s, 2)
+      end
+    end
+    
+    @items = $game_player.item_hotkeys.clone
+    @skills = $game_player.skill_hotkeys.clone
+  end
+end
+
+#==============================================================================
+# ■ Minimap
+#------------------------------------------------------------------------------
+#  Миникарта с плитками 6x6 и закруглёнными краями
+#==============================================================================
+class Minimap < Sprite
+  attr_reader :map_id
+  
+  #--------------------------------------------------------------------------
+  # ● Инициализация
+  #--------------------------------------------------------------------------
+  def initialize
+    super(Viewport.new(520, 390, 120, 90))
+    @autotile = create_minimap_autotile
+    create_passable_floor
+    self.x = 0
+    self.y = 0
+    viewport.z = 5000
+    @events, @names = check_events
+    create_sevents
+    self.visible = true
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание автотайла миникарты
+  #--------------------------------------------------------------------------
+  def create_minimap_autotile
+    b = Bitmap.new(18, 24)
+    c1 = Color.new(191, 191, 191)
+    c2 = Color.new(255, 255, 255)
+    
+    b.fill_rect(0, 0, 6, 6, c1)
+    b.fill_rect(12, 0, 6, 6, c1)
+    b.fill_rect(2, 8, 14, 14, c1)
+    b.fill_rect(1, 10, 1, 10, c1)
+    b.fill_rect(4, 7, 10, 1, c1)
+    b.fill_rect(16, 10, 1, 10, c1)
+    b.fill_rect(4, 22, 10, 1, c1)
+    
+    # Подсветка
+    b.fill_rect(4, 6, 10, 1, c2)
+    b.fill_rect(14, 7, 2, 1, c2)
+    b.fill_rect(16, 8, 1, 2, c2)
+    b.fill_rect(17, 10, 1, 10, c2)
+    b.fill_rect(16, 20, 1, 2, c2)
+    b.fill_rect(14, 22, 2, 1, c2)
+    b.fill_rect(4, 23, 10, 1, c2)
+    b.fill_rect(2, 22, 2, 1, c2)
+    b.fill_rect(1, 20, 1, 2, c2)
+    b.fill_rect(0, 10, 1, 10, c2)
+    b.fill_rect(1, 8, 1, 2, c2)
+    b.fill_rect(2, 7, 2, 1, c2)
+    
+    return b
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание карты проходимости
+  #--------------------------------------------------------------------------
+  def create_passable_floor
+    self.bitmap.dispose if self.bitmap != nil
+    @map_id = $game_map.map_id
+    
+    w = $game_map.width
+    h = $game_map.height
+    
+    self.bitmap = Bitmap.new(6 * w, 6 * h)
+    self.bitmap.fill_rect(0, 0, 6 * w, 6 * h, Color.new(0, 0, 0, 128))
+    
+    v_map = $game_map.virtual_passability
+    
+    for x in 0...v_map.xsize
+      for y in 0...v_map.ysize
+        draw_passability_tile(x, y, v_map[x, y])
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Отрисовка плитки проходимости
+  #--------------------------------------------------------------------------
+  def draw_passability_tile(x, y, direction)
+    case direction
+    when 0x01 # Вниз
+      self.bitmap.blt(x * 6, y * 6 + 3, @autotile, Rect.new(0, 0, 6, 3), 128)
+    when 0x02 # Влево
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(3, 0, 3, 6), 128)
+    when 0x03 # Влево-Вниз
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(12, 6, 6, 6), 128)
+    when 0x04 # Вправо
+      self.bitmap.blt(x * 6 + 3, y * 6, @autotile, Rect.new(0, 0, 3, 6), 128)
+    when 0x05 # Вправо-Вниз
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(0, 6, 6, 6), 128)
+    when 0x06 # Вправо-Влево
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(6, 6, 6, 3), 128)
+      self.bitmap.blt(x * 6, y * 6 + 3, @autotile, Rect.new(6, 21, 6, 3), 128)
+    when 0x07 # Вправо-Влево-Вниз
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(6, 6, 6, 6), 128)
+    when 0x08 # Вверх
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(0, 3, 6, 3), 128)
+    when 0x09 # Вверх-Вниз
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(0, 12, 3, 6), 128)
+      self.bitmap.blt(x * 6 + 3, y * 6, @autotile, Rect.new(15, 12, 3, 6), 128)
+    when 0x0A # Вверх-Влево
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(12, 18, 6, 6), 128)
+    when 0x0B # Вверх-Влево-Вниз
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(12, 12, 6, 6), 128)
+    when 0x0C # Вверх-Вправо
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(0, 18, 6, 6), 128)
+    when 0x0D # Вверх-Вправо-Вниз
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(0, 12, 6, 6), 128)
+    when 0x0E # Вверх-Вправо-Влево
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(6, 18, 6, 6), 128)
+    when 0x0F # Все направления
+      self.bitmap.blt(x * 6, y * 6, @autotile, Rect.new(6, 12, 6, 6), 128)
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление
+  #--------------------------------------------------------------------------
+  def update(override = false)
+    create_passable_floor if @map_id != $game_map.map_id
+    
+    ev = check_events
+    if [@events, @names] != ev
+      @events, @names = ev
+      destroy_sevents
+      create_sevents
+    end
+    
+    update_scroll(override)
+    update_event_sprites
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление прокрутки
+  #--------------------------------------------------------------------------
+  def update_scroll(override)
+    if $game_system.minimap < 2
+      self.ox = $game_map.display_x * 6 / 128
+      self.oy = $game_map.display_y * 6 / 128
+    elsif !($game_system.turn_button && Input.press?(Input::Turn)) || override
+      update_fullscreen_scroll
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление полноэкранной прокрутки
+  #--------------------------------------------------------------------------
+  def update_fullscreen_scroll
+    # Горизонтальная прокрутка
+    if self.bitmap.width > 640
+      border = $game_player.real_x * 6 / 128 - 320
+      border_x = self.bitmap.width - 640
+      
+      if border < 0
+        self.ox = 0
+      elsif border > border_x
+        self.ox = border_x
+      else
+        self.ox = border
+      end
+    else
+      self.ox = self.bitmap.width / 2 - 320
+    end
+    
+    # Вертикальная прокрутка
+    if self.bitmap.height > 480
+      border = $game_player.real_y * 6 / 128 - 240
+      border_y = self.bitmap.height - 480
+      
+      if border < 0
+        self.oy = 0
+      elsif border > border_y
+        self.oy = border_y
+      else
+        self.oy = border
+      end
+    else
+      self.oy = self.bitmap.height / 2 - 240
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление спрайтов событий
+  #--------------------------------------------------------------------------
+  def update_event_sprites
+    @sevents.each_index do |i|
+      if $game_system.minimap == 2 || @events[i].update?
+        @sevents[i].x = self.x + @events[i].real_x * 6 / 128
+        @sevents[i].y = self.y + @events[i].real_y * 6 / 128
+        @sevents[i].ox = self.ox
+        @sevents[i].oy = self.oy
+        
+        # Обновление направления стрелки
+        if @names[i] != '' && !@events[i].dropped &&
+           (@events[i].is_a?(Map_Actor) || !@events[i].name.clone.gsub!('\box') { '' })
+          @sevents[i].src_rect.set((@events[i].direction - 2) * 7, 0, 14, 14)
+          @sevents[i].ox += 3
+          @sevents[i].oy += 3
+        end
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание спрайтов событий
+  #--------------------------------------------------------------------------
+  def create_sevents
+    @sevents = []
+    
+    @events.each_index do |i|
+      sprite = create_event_sprite(i)
+      sprite.bitmap = Bitmap.new(1, 1) if sprite.bitmap.nil?
+      sprite.ox = 64
+      sprite.oy = 64
+      
+      if sprite.bitmap.width != 6
+        sprite.src_rect.set((@events[i].direction - 2) * 7, 0, 14, 14)
+      end
+      
+      @sevents.push(sprite)
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание спрайта для события
+  #--------------------------------------------------------------------------
+  def create_event_sprite(index)
+    sprite = Sprite.new(viewport)
+    rect = Rect.new(0, 0, 56, 14)
+    
+    if @events[index] == $game_player
+      # Игрок - зелёная стрелка
+      if @names[index] != ''
+        sprite.bitmap = Bitmap.new(56, 14)
+        sprite.bitmap.blt(0, 0, $BlizzABS.cache.image('green_arrow'), rect, 128)
+      end
+      sprite.z = 100
+      
+    elsif @events[index].is_a?(Map_Actor)
+      # Союзник - синяя стрелка
+      if @names[index] != ''
+        sprite.bitmap = Bitmap.new(56, 14)
+        sprite.bitmap.blt(0, 0, $BlizzABS.cache.image('blue_arrow'), rect, 128)
+      end
+      sprite.z = 80
+      
+    elsif @events[index].class == Map_Enemy
+      # Враг - красная стрелка/точка
+      create_enemy_sprite(sprite, index, rect)
+      
+    elsif @events[index].dropped
+      # Выпавший предмет - голубая точка
+      sprite.bitmap = Bitmap.new(8, 8)
+      sprite.bitmap.fill_rect(0, 0, 8, 8, Color.new(0, 0, 0, 128))
+      sprite.bitmap.fill_rect(1, 1, 6, 6, Color.new(0, 255, 255, 128))
+      sprite.z = 70
+      
+    elsif @events[index].class == Game_Event
+      # Обычное событие
+      create_event_marker(sprite, index, rect)
+      
+    else
+      # Прочее - белая стрелка/точка
+      create_default_sprite(sprite, index, rect)
+    end
+    
+    return sprite
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание спрайта врага
+  #--------------------------------------------------------------------------
+  def create_enemy_sprite(sprite, index, rect)
+    if @names[index] == '' || @events[index].name.clone.gsub!('\box') { '' }
+      sprite.bitmap = Bitmap.new(6, 6)
+      sprite.bitmap.fill_rect(0, 0, 6, 6, Color.new(0, 0, 0, 128))
+      sprite.bitmap.fill_rect(1, 1, 4, 4, Color.new(255, 0, 0, 128))
+    else
+      sprite.bitmap = Bitmap.new(56, 14)
+      sprite.bitmap.blt(0, 0, $BlizzABS.cache.image('red_arrow'), rect, 128)
+    end
+    sprite.z = 50
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание маркера события
+  #--------------------------------------------------------------------------
+  def create_event_marker(sprite, index, rect)
+    color = nil
+    arrow = nil
+    
+    if @events[index].name.clone.gsub!('\spc') { '' }
+      color = Color.new(255, 255, 0, 128)
+      arrow = 'yellow_arrow'
+      sprite.z = 60
+    elsif @events[index].teleport
+      color = Color.new(128, 0, 255, 128)
+      arrow = 'violet_arrow'
+      sprite.z = 40
+    end
+    
+    if @names[index] == '' || @events[index].name.clone.gsub!('\box') { '' }
+      sprite.bitmap = Bitmap.new(6, 6)
+      sprite.bitmap.fill_rect(0, 0, 6, 6, Color.new(0, 0, 0, 128))
+      sprite.bitmap.fill_rect(1, 1, 4, 4, color) if color
+    else
+      sprite.bitmap = Bitmap.new(56, 14)
+      sprite.bitmap.blt(0, 0, $BlizzABS.cache.image(arrow), rect, 128) if arrow
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание спрайта по умолчанию
+  #--------------------------------------------------------------------------
+  def create_default_sprite(sprite, index, rect)
+    if @names[index] == '' || @events[index].name.clone.gsub!('\box') { '' }
+      sprite.bitmap = Bitmap.new(6, 6)
+      sprite.bitmap.fill_rect(0, 0, 6, 6, Color.new(0, 0, 0, 128))
+      sprite.bitmap.fill_rect(1, 1, 4, 4, Color.new(255, 255, 255, 128))
+    else
+      sprite.bitmap = Bitmap.new(56, 14)
+      sprite.bitmap.blt(0, 0, $BlizzABS.cache.image('white_arrow'), 
+                        Rect.new(0, 0, 56, 14), 128)
+    end
+  end
+end
+
+#==============================================================================
+# ■ Scene_Map
+#------------------------------------------------------------------------------
+#  Модификация для поддержки Party HUD
+#==============================================================================
+class Scene_Map
+  alias parhud_main main
+  def main
+    create_hud_elements
+    parhud_main
+    dispose_hud_elements
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание элементов HUD
+  #--------------------------------------------------------------------------
+  def create_hud_elements
+    @hud = Hud.new if $game_system.hud
+    @parhud = ParHud.new if $game_system.parhud
+    @hotkeys = Hotkey_Assignment.new if $game_system.hotkeys
+    @minimap = Minimap.new if $game_system.minimap > 0
+    test_in_battle
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Освобождение элементов HUD
+  #--------------------------------------------------------------------------
+  def dispose_hud_elements
+    $game_temp.in_battle = false
+    [@hud, @parhud, @hotkeys, @minimap].each { |s| s.dispose if s != nil }
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление HUD
+  #--------------------------------------------------------------------------
+  def hud_update
+    check_huds
+    update_minimap
+    update_hotkeys
+    
+    [@hud, @parhud, @minimap, @hotkeys].each do |s|
+      next if s.nil?
+      
+      s.update
+      
+      # Прозрачность при перекрытии игроком
+      player_overlaps = $game_player.screen_x < s.vx + s.vw + 16 &&
+                        $game_player.screen_y < s.vy + s.vh + 48 &&
+                        $game_player.screen_x > s.vx &&
+                        $game_player.screen_y > s.vy &&
+                        ((s == @minimap) ? ($game_system.minimap < 2) : true)
+      
+      if player_overlaps
+        s.opacity -= 25 if s.opacity > 80
+      elsif s.opacity <= 255
+        s.opacity += 25
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка состояния HUD
+  #--------------------------------------------------------------------------
+  def check_huds
+    # Переключение миникарты
+    if $game_system.minimap_button && Input.trigger?(Input::Minimap)
+      max_modes = PARHUD_CONFIG::MINIMAP_FULLSCREEN ? 3 : 2
+      $game_system.minimap = ($game_system.minimap + 1) % max_modes
+    end
+    
+    # Переключение горячих клавиш
+    if $game_system.hotkey_button && Input.trigger?(Input::Hotkey)
+      $game_system.hotkeys = !$game_system.hotkeys
+    end
+    
+    # Переключение HUD
+    if $game_system.hud_button && Input.trigger?(Input::Hud)
+      $game_system.hud = !$game_system.hud
+      $game_system.parhud = !$game_system.parhud
+    end
+    
+    # Создание/удаление миникарты
+    if $game_system.minimap == 0 && @minimap != nil
+      @minimap.dispose
+      @minimap = nil
+    elsif BlizzABS::Config::MINIMAP && $game_system.minimap > 0 && @minimap.nil?
+      @minimap = Minimap.new
+    end
+    
+    # Создание/удаление горячих клавиш
+    if !$game_system.hotkeys && @hotkeys != nil
+      @hotkeys.dispose
+      @hotkeys = nil
+    elsif BlizzABS::Config::HOTKEYS && $game_system.hotkeys && @hotkeys.nil?
+      @hotkeys = Hotkey_Assignment.new
+    end
+    
+    # Создание/удаление HUD
+    if !$game_system.hud && @hud != nil
+      @hud.dispose
+      @hud = nil
+      @parhud.dispose
+      @parhud = nil
+    elsif BlizzABS::Config::HUD_ENABLED && $game_system.hud
+      @hud = Hud.new if @hud.nil?
+      @parhud = ParHud.new if @parhud.nil?
+    end
+  end
+end
+
+#==============================================================================
+# ■ Window_Skill_Hotkey
+#------------------------------------------------------------------------------
+#  Окно навыков для назначения горячих клавиш
+#==============================================================================
+class Window_Skill_Hotkey < Window_Skill
+  def initialize(actor)
+    super
+    @column_max = 1
+    self.width = 320
+    self.height = 416
+    self.y = 0
+    self.z = 21000
+    self.cursor_rect.empty
+    self.active = false
+    refresh
+  end
+end
+
+#==============================================================================
+# ■ Window_Item_Hotkey
+#------------------------------------------------------------------------------
+#  Окно предметов для назначения горячих клавиш
+#==============================================================================
+class Window_Item_Hotkey < Window_Item
+  def initialize
+    super
+    @column_max = 1
+    self.width = 320
+    self.height = 416
+    self.x = 320
+    self.y = 0
+    self.z = 21000
+    self.cursor_rect.empty
+    self.active = false
+    refresh
+  end
+end
+
+#==============================================================================
+# ■ Scene_Hotkeys
+#------------------------------------------------------------------------------
+#  Сцена назначения горячих клавиш
+#==============================================================================
+class Scene_Hotkeys
+  #--------------------------------------------------------------------------
+  # ● Главный метод
+  #--------------------------------------------------------------------------
+  def main
+    create_scene_elements
+    Graphics.transition
+    run_scene_loop
+    dispose_scene_elements
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание элементов сцены
+  #--------------------------------------------------------------------------
+  def create_scene_elements
+    @spriteset = Spriteset_Map.new
+    @view = Viewport.new(0, 0, 640, 480)
+    @view.tone = @tone.clone if @tone
+    
+    @hud = Hud.new if BlizzABS::Config::HUD_ENABLED && $game_system.hud
+    
+    if BlizzABS::Config::HOTKEYS
+      @hotkeys = Hotkey_Assignment.new
+      @hotkeys.z = 5000
+    end
+    
+    @minimap = Minimap.new if BlizzABS::Config::MINIMAP && $game_system.minimap > 0
+    
+    create_choice_sprite
+    
+    @skill_window = Window_Skill_Hotkey.new($game_player.battler)
+    @item_window = Window_Item_Hotkey.new
+    
+    @active = true
+    @index = 0
+    @up_mode = true
+    @last_active = true
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание спрайта выбора
+  #--------------------------------------------------------------------------
+  def create_choice_sprite
+    @choice = Sprite.new
+    @choice.bitmap = create_menu_arrow
+    @choice.x = 160
+    @choice.y = 440
+    @choice.z = 500
+    @choice.opacity = 128
+    @choice.ox = -8
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание стрелки меню
+  #--------------------------------------------------------------------------
+  def create_menu_arrow
+    b = Bitmap.new(16, 9)
+    c1 = Color.new(0, 0, 0)
+    c2 = Color.new(255, 255, 255)
+    c3 = Color.new(127, 127, 127)
+    
+    b.fill_rect(7, 8, 2, 1, c2)
+    b.set_pixel(6, 7, c2)
+    b.fill_rect(7, 7, 1, 7, c3)
+    b.fill_rect(8, 7, 1, 7, c1)
+    b.set_pixel(9, 7, c2)
+    b.set_pixel(5, 6, c2)
+    b.fill_rect(6, 6, 1, 6, c3)
+    b.fill_rect(9, 6, 1, 6, c1)
+    b.set_pixel(10, 6, c2)
+    b.set_pixel(4, 5, c2)
+    b.fill_rect(5, 5, 1, 5, c3)
+    b.fill_rect(10, 5, 1, 5, c1)
+    b.set_pixel(11, 5, c2)
+    b.set_pixel(3, 4, c2)
+    b.fill_rect(4, 4, 1, 4, c3)
+    b.fill_rect(11, 4, 1, 4, c1)
+    b.set_pixel(12, 4, c2)
+    b.set_pixel(2, 3, c2)
+    b.fill_rect(3, 3, 1, 3, c3)
+    b.fill_rect(12, 3, 1, 3, c1)
+    b.set_pixel(13, 3, c2)
+    b.set_pixel(1, 2, c2)
+    b.fill_rect(2, 2, 1, 2, c3)
+    b.fill_rect(13, 2, 1, 2, c1)
+    b.set_pixel(14, 2, c2)
+    b.set_pixel(0, 1, c2)
+    b.set_pixel(1, 1, c3)
+    b.set_pixel(14, 1, c1)
+    b.set_pixel(15, 1, c2)
+    b.fill_rect(1, 0, 14, 1, c2)
+    
+    return b
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Главный цикл сцены
+  #--------------------------------------------------------------------------
+  def run_scene_loop
+    loop do
+      Graphics.update
+      Input.update
+      update
+      break if $scene != self
+    end
+    Graphics.freeze
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Освобождение элементов сцены
+  #--------------------------------------------------------------------------
+  def dispose_scene_elements
+    @spriteset.dispose
+    [@hud, @hotkeys, @minimap].each { |s| s.dispose if s != nil }
+    @choice.dispose
+    @skill_window.dispose
+    @item_window.dispose
+    @view.dispose
+  end
+end
