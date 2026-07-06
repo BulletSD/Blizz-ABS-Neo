@@ -120,6 +120,15 @@ module ABS_CustomOverlay
     :skill  => 2,
     :block  => 3
   },
+  
+  "EdenDemon" => {
+    :idle   => 3,
+    :death  => 2,
+    :walk   => 3,
+    :attack => 1,
+    :skill  => 2,
+    :block  => 3
+  },
 
   "GH_Girl" => {
     :idle   => 1,
@@ -1605,10 +1614,15 @@ if defined?(Control_Sprite_Character)
       @abs_overlay_sprite.ox = fw / 2
       @abs_overlay_sprite.oy = fh / 2
 
-      @abs_overlay_sprite.x = base.x + ABS_CustomOverlay::OFFSET_X
-      @abs_overlay_sprite.y = base.y + ABS_CustomOverlay::OFFSET_Y
-      #@abs_overlay_sprite.z = (base.z rescue 0) + ABS_CustomOverlay::Z_PLUS
-
+     # @abs_overlay_sprite.x = base.x + ABS_CustomOverlay::OFFSET_X
+     # @abs_overlay_sprite.y = base.y + ABS_CustomOverlay::OFFSET_Y
+     # @abs_overlay_sprite.z = (base.z rescue 0) + ABS_CustomOverlay::Z_PLUS
+      
+      ox = config[:offset_x] || ABS_CustomOverlay::OFFSET_X
+      oy = config[:offset_y] || ABS_CustomOverlay::OFFSET_Y
+      @abs_overlay_sprite.x = base.x + ox
+      @abs_overlay_sprite.y = base.y + oy
+     
       z_plus = (config[:z_plus] || ABS_CustomOverlay::Z_PLUS)
       @abs_overlay_sprite.z = (base.z rescue 0) + z_plus
 
@@ -2132,7 +2146,7 @@ if defined?(Map_Enemy)
 
       sizes_to_check = [
         "344x257", "400x299", "120x120", "284x220", "200x136", "195x129",
-        "164x164", "160x160", "128x128", "96x96",
+        "164x164", "160x160", "140x140", "128x128", "96x96",
         "64x64",   "48x48",   "32x32"
       ]
 
