@@ -2,7 +2,7 @@
 # ■ Blizz-ABS Party HUD
 #------------------------------------------------------------------------------
 #  Авторы: Winkio, Dark Rise Inc.
-#  Версия: 1.3
+#  Версия: 1.4 (исправление утечки HUD-спрайтов при смене сцены)
 #------------------------------------------------------------------------------
 #  Этот скрипт модифицирует HUD системы Blizz-ABS для отображения HP/SP
 #  до шести членов группы одновременно.
@@ -1416,6 +1416,17 @@ end
 # ■ Scene_Map
 #------------------------------------------------------------------------------
 #  Модификация для поддержки Party HUD
+#------------------------------------------------------------------------------
+#  ВАЖНОЕ АРХИТЕКТУРНОЕ ЗАМЕЧАНИЕ (устранение утечки спрайтов):
+#  Оригинальный main из Blizz-ABS (часть 3) уже создаёт и уничтожает
+#  @hud, @hotkeys и @minimap самостоятельно (через alias parhud_main).
+#  Поэтому create_hud_elements/dispose_hud_elements здесь отвечают
+#  ТОЛЬКО за @parhud — единственный элемент, о котором Blizz-ABS
+#  ничего не знает. Если создавать @hud/@hotkeys/@minimap ЕЩЁ РАЗ
+#  здесь, то оригинальный main (parhud_main) перезапишет переменные
+#  своими собственными новыми экземплярами — первый набор потеряет
+#  единственную ссылку и никогда не будет уничтожен (эффект
+#  "призрачного" HUD, остающегося на экране после смены сцены).
 #==============================================================================
 class Scene_Map
   alias parhud_main main
@@ -1428,20 +1439,30 @@ class Scene_Map
   #--------------------------------------------------------------------------
   # ● Создание элементов HUD
   #--------------------------------------------------------------------------
+  # Создаём здесь ТОЛЬКО ParHud. @hud/@hotkeys/@minimap создаются
+  # оригинальным Blizz-ABS main (parhud_main) сразу после этого метода —
+  # дублировать их создание здесь нельзя (см. пояснение выше класса).
+  #--------------------------------------------------------------------------
   def create_hud_elements
-    @hud = Hud.new if $game_system.hud
     @parhud = ParHud.new if $game_system.parhud
-    @hotkeys = Hotkey_Assignment.new if $game_system.hotkeys
-    @minimap = Minimap.new if $game_system.minimap > 0
     test_in_battle
   end
   
   #--------------------------------------------------------------------------
   # ● Освобождение элементов HUD
   #--------------------------------------------------------------------------
+  # К моменту вызова этого метода @hud/@hotkeys/@minimap УЖЕ уничтожены
+  # внутри parhud_main (в его собственном завершающем блоке), поэтому
+  # для них достаточно проверки disposed? на случай, если сцена была
+  # прервана нестандартным образом. @parhud уничтожаем здесь явно,
+  # так как оригинальный Blizz-ABS main о нём не знает.
+  #--------------------------------------------------------------------------
   def dispose_hud_elements
     $game_temp.in_battle = false
-    [@hud, @parhud, @hotkeys, @minimap].each { |s| s.dispose if s != nil }
+    [@hud, @parhud, @hotkeys, @minimap].each do |s|
+      next if s.nil?
+      s.dispose unless s.disposed?
+    end
   end
   
   #--------------------------------------------------------------------------
@@ -1481,18 +1502,18 @@ class Scene_Map
       max_modes = PARHUD_CONFIG::MINIMAP_FULLSCREEN ? 3 : 2
       $game_system.minimap = ($game_system.minimap + 1) % max_modes
     end
-    
+
     # Переключение горячих клавиш
     if $game_system.hotkey_button && Input.trigger?(Input::Hotkey)
       $game_system.hotkeys = !$game_system.hotkeys
     end
-    
+
     # Переключение HUD
     if $game_system.hud_button && Input.trigger?(Input::Hud)
       $game_system.hud = !$game_system.hud
       $game_system.parhud = !$game_system.parhud
     end
-    
+
     # Создание/удаление миникарты
     if $game_system.minimap == 0 && @minimap != nil
       @minimap.dispose
@@ -1500,7 +1521,7 @@ class Scene_Map
     elsif BlizzABS::Config::MINIMAP && $game_system.minimap > 0 && @minimap.nil?
       @minimap = Minimap.new
     end
-    
+
     # Создание/удаление горячих клавиш
     if !$game_system.hotkeys && @hotkeys != nil
       @hotkeys.dispose
@@ -1508,18 +1529,21 @@ class Scene_Map
     elsif BlizzABS::Config::HOTKEYS && $game_system.hotkeys && @hotkeys.nil?
       @hotkeys = Hotkey_Assignment.new
     end
-    
+
     # Создание/удаление HUD
+    # Проверка @parhud != nil перед dispose защищает от NoMethodError
+    # при рассинхронизации флагов hud/parhud.
     if !$game_system.hud && @hud != nil
       @hud.dispose
       @hud = nil
-      @parhud.dispose
+      @parhud.dispose unless @parhud.nil?
       @parhud = nil
     elsif BlizzABS::Config::HUD_ENABLED && $game_system.hud
       @hud = Hud.new if @hud.nil?
       @parhud = ParHud.new if @parhud.nil?
     end
   end
+
 end
 
 #==============================================================================
