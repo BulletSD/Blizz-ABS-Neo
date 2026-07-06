@@ -2083,7 +2083,7 @@ module BlizzABS
     #  Gets the respawning coordinates for the new enemy.
     #--------------------------------------------------------------------------
     def get_respawn_coordinates(enemy)
-      # if fixed Respawn Point exists
+       # if fixed Respawn Point exists
       if enemy.respawn_point != nil
         # coordinates of the Respawn Point
         return [enemy.respawn_point.x, enemy.respawn_point.y]
@@ -5238,7 +5238,7 @@ module BlizzABS
     #  Finds the closest tile relative to the starting coordinates that does
     #  not have a terrain tag indicating that there is no floor beneath. If
     #  none is found, the method returns the starting coordinates.
-    #--------------------------------------------------------------------------
+    #--------------------------------------------------------------------------  
     def closest_floor(x, y)
       # create mark table and pending array
       table, pending = Table.new($game_map.width, $game_map.height), [[x, y]]
