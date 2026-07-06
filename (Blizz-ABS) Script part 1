@@ -262,6 +262,7 @@ module BlizzABS
       when 2 then 1.7 # Бастард
       when 3 then 1.8 # Гомбай но тати
       when 4 then 2.0 # Иштен Кардъя
+      when 5 then 3.0 # Удар Грифона
       else        1.5 # Стандарт
       end
     end
