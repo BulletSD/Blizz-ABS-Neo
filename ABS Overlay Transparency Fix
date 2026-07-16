@@ -1,0 +1,28 @@
+#==============================================================================
+# ■ ABS Overlay Transparency Fix
+#------------------------------------------------------------------------------
+# Заставляет оверлей-спрайт (Graphics/Pictures) уважать стандартный флаг
+# transparent. Теперь команда события "Прозрачность: ВКЛ/ВЫКЛ" полностью
+# скрывает персонажа целиком (и штатный спрайт, и картиночный оверлей),
+# без необходимости трогать Call Script.
+#==============================================================================
+
+class Control_Sprite_Character
+
+  unless method_defined?(:abs_transfix_overlay_update)
+    alias abs_transfix_overlay_update abs_overlay_update
+  end
+
+  def abs_overlay_update
+    # если персонаж прозрачен - скрываем оверлей через src_rect,
+    # не через opacity (чтобы не мешать другим эффектам с opacity)
+    if @character.respond_to?(:transparent) && @character.transparent
+      if @abs_overlay_sprite && !@abs_overlay_sprite.disposed?
+        @abs_overlay_sprite.src_rect.set(0, 0, 0, 0)
+      end
+      return
+    end
+    abs_transfix_overlay_update
+  end
+
+end
