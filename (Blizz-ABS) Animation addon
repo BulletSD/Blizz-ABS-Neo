@@ -225,9 +225,36 @@ module ABS_CustomOverlay
   CUSTOM_PRIORITY = 5
   CUSTOM_LOOP = false
   CUSTOM_ALLOW_MOVEMENT = false
+#============================================================================
+  # :: Скорости кастомных анимаций (CUSTOM_ANIMATION_SPEEDS)
+  #----------------------------------------------------------------------------
+  # Ключ   - имя кастомной анимации (строка), в точности как в play_custom_
+  #          animation("имя", ...) / anim("имя", ...) и как в abs_sprite_config
+  #          (c[:имя] = "файл"), но БЕЗ двоеточия - только строка в кавычках.
+  # Value  - сколько игровых тиков (Graphics.update) держится ОДИН кадр спрайта
+  #          перед переключением на следующий. Больше число = медленнее анимация.
+  #
+  # Автоматическая длительность всей анимации (когда duration = 0 в вызове
+  # play_custom_animation) считается так:
+  #   total_frames = ширина_картинки / ширина_одного_кадра
+  #   итоговая_длительность_в_тиках = total_frames * значение_отсюда
+  #
+  # Если для анимации нет записи здесь - используется общий ANIMATION_SPEED
+  # (см. выше в этом модуле), сейчас = 4.
+  #
+  # Примеры на глаз (при total_frames = 8, 60 тиков = 1 секунда):
+  #   1  -> очень быстро,  8 тиков  (~0.13 сек за цикл)
+  #   4  -> нормально,     32 тика  (~0.53 сек за цикл)  [значение по умолчанию]
+  #   6  -> медленнее,     48 тиков (~0.8 сек за цикл)
+  #   10 -> очень медленно, 80 тиков (~1.3 сек за цикл)
+  #============================================================================
   CUSTOM_ANIMATION_SPEEDS = {
-    "takesB" => 5, "takesR" => 5, "takesY" => 5,
-    "sleeping" => 6, "sitting" => 5, "appearance" => 1
+    "takesB"   => 5,   # получение урона (синий эффект)
+    "takesR"   => 5,   # получение урона (красный эффект)
+    "takesY"   => 5,   # получение урона (жёлтый эффект)
+    "sitting"  => 5,   # сидение
+    "appearance" => 1, # появление на карте (обычно быстрая вспышка)
+    "HSleep" => 5   # сон Хелен - намеренно медленно, тягучее дыхание
   }
 
   #============================================================================
@@ -508,7 +535,7 @@ end
     @abs_animation_queue ||= []
     @abs_damage_queue ||= []
   end
-
+  
   #============================================================================
   # :: Управление пользовательскими анимациями
   #============================================================================
@@ -519,20 +546,39 @@ end
   # anim_loop - зацикливать? (nil = использовать настройку по умолчанию)
   # allow_movement - разрешить движение? (nil = использовать настройку по умолчанию)
   def play_custom_animation(animation_name, duration = 60, anim_loop = nil, allow_movement = nil)
-    # Получаем настройки по умолчанию из модуля (если доступен)
-    loop_default = false
-    movement_default = false
-    
-    if defined?(ABS_CustomOverlay)
-      loop_default = ABS_CustomOverlay::CUSTOM_LOOP
-      movement_default = ABS_CustomOverlay::CUSTOM_ALLOW_MOVEMENT
-    end
-    
-    @abs_custom_animation = animation_name
-    @abs_custom_animation_duration = duration
-    @abs_custom_animation_loop = anim_loop.nil? ? loop_default : anim_loop
-    @abs_custom_animation_movement = allow_movement.nil? ? movement_default : allow_movement
+  # Получаем настройки по умолчанию
+  loop_default = false
+  movement_default = false
+
+  if defined?(ABS_CustomOverlay)
+    loop_default = ABS_CustomOverlay::CUSTOM_LOOP
+    movement_default = ABS_CustomOverlay::CUSTOM_ALLOW_MOVEMENT
   end
+
+  #----------------------------------------------------------
+  # Автоматический расчёт длительности.
+  # Если duration <= 0, считаем:
+  # количество кадров × скорость данной анимации.
+  #----------------------------------------------------------
+  if defined?(ABS_CustomOverlay) && duration.to_i <= 0
+    begin
+      frames = ABS_CustomOverlay.total_frames_for_key(self, animation_name)
+      speed  = ABS_CustomOverlay.get_animation_speed(:custom, animation_name)
+
+      frames = 1 if frames.nil? || frames < 1
+      speed  = 1 if speed.nil?  || speed  < 1
+
+      duration = frames * speed
+    rescue
+      duration = 60
+    end
+  end
+
+  @abs_custom_animation = animation_name
+  @abs_custom_animation_duration = duration
+  @abs_custom_animation_loop = anim_loop.nil? ? loop_default : anim_loop
+  @abs_custom_animation_movement = allow_movement.nil? ? movement_default : allow_movement
+end
 
   # Остановка пользовательской анимации
   def stop_custom_animation
@@ -1506,7 +1552,7 @@ if defined?(Control_Sprite_Character)
         fw = 1 if fw <= 0
         @abs_overlay_total_frames = bmp.width / fw
         @abs_overlay_total_frames = 1 if @abs_overlay_total_frames <= 0
-      end
+        end
 
       # ── Скорость анимации ─────────────────────────────────────────────────
       current_speed = ABS_CustomOverlay::ANIMATION_SPEED
@@ -1936,27 +1982,65 @@ class Game_Character
   alias abs_overlay_play_custom_animation_later play_custom_animation unless method_defined?(:abs_overlay_play_custom_animation_later)
 
     def play_custom_animation(animation_name, duration = 60, loop_anim = nil, allow_movement = nil)
-    animation_name = animation_name.to_s
+  animation_name = animation_name.to_s
 
-    # Автоматический расчет длительности если не указана или невалидна
-    if duration.to_i < 1
-      # ИСПРАВЛЕНИЕ: Гарантируем, что cfg не будет nil
-      cfg = self.abs_sprite_config
-      cfg = {} if cfg.nil?
-      
-      pic_key = cfg[animation_name.to_sym]
+  if duration.to_i < 1
+    cfg = self.abs_sprite_config
+    cfg = {} if cfg.nil?
 
-      # Получаем количество кадров из цепочки или одиночного файла
-      frames = ABS_CustomOverlay.total_frames_for_key(self, pic_key, cfg) rescue 1
-      frames = 1 if frames.nil? || frames <= 0
+    pic_key = nil
 
-      # Получаем скорость анимации
-      spd = ABS_CustomOverlay.get_animation_speed(:custom, animation_name)
-      spd = 1 if spd.nil? || spd < 1
+    # Приоритет 1: прямой ключ в конфиге
+    k1 = cfg[animation_name.to_sym]
+    pic_key = k1 if k1 && !k1.to_s.empty?
 
-      duration = frames * spd
+    # Приоритет 2: направленные ключи
+    if pic_key.nil? || pic_key.to_s.empty?
+      ["_right", "_left", "_down", "_up"].each do |sfx|
+        sym = (animation_name + sfx).to_sym
+        k2 = cfg[sym]
+        if k2 && !k2.to_s.empty?
+          pic_key = k2
+          break
+        end
+      end
     end
 
+    # Приоритет 3: файл напрямую по имени анимации
+    if pic_key.nil? || pic_key.to_s.empty?
+      bmp = ABS_CustomOverlay.bitmap(animation_name)
+      pic_key = animation_name if bmp
+    end
+
+    # Приоритет 4: цепочка сегментов напрямую
+    if pic_key.nil? || pic_key.to_s.empty?
+      chain0 = ABS_CustomOverlay.chain_key(animation_name, 0)
+      bmp2 = ABS_CustomOverlay.bitmap(chain0)
+      pic_key = animation_name if bmp2
+    end
+
+    frames = ABS_CustomOverlay.total_frames_for_key(
+      self, pic_key, cfg)
+    frames = 1 if frames.nil? || frames <= 0
+
+    spd = ABS_CustomOverlay.get_animation_speed(
+      :custom, animation_name)
+    spd = 1 if spd.nil? || spd < 1
+
+    duration = frames * spd
+  end
+
+  abs_overlay_play_custom_animation_later(
+    animation_name, duration, loop_anim, allow_movement)
+
+  if self == $game_player
+    if !self.abs_custom_animation_movement
+      ABS_InputLock.lock
+      self.abs_custom_lock_keys = true
+    else
+      self.abs_custom_lock_keys = false
+    end
+  end
     # Вызываем оригинальный метод
     abs_overlay_play_custom_animation_later(animation_name, duration, loop_anim, allow_movement)
 
