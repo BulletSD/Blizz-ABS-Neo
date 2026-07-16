@@ -1,0 +1,152 @@
+#==============================================================================
+# ■ Блок: Частичное гашение урона + Отбрасывание атакующего (Merged)
+#------------------------------------------------------------------------------
+# Два независимых эффекта на успешный блок (FULL_DEFEND):
+#   1. Частичный блок  - вместо 0% урона проходит часть удара (настраивается)
+#   2. Block Knockback - атакующий отбрасывается и замирает на N кадров
+# Оба эффекта работают ТОЛЬКО против обычных врагов, боссы исключены по ID.
+# Каждый эффект включается/выключается независимо через ENABLED-флаги ниже -
+# удобно для А/Б тестирования, что даёт лучший результат.
+#
+# Совместимость: RPG Maker XP / RGSS / Ruby 1.8.1
+#==============================================================================
+
+module PartialBlock
+  # Включить/выключить частичное гашение урона при блоке
+  ENABLED = false
+
+  # Доля урона, которая ПРОХОДИТ сквозь блок (0.25 = блок гасит 75% урона)
+  DAMAGE_THROUGH = 0.25
+
+  # Множитель отброса блокирующего при частичном блоке (держит щит крепче)
+  BLOCK_STAGGER_MULT = 0.3
+end
+
+module BlockKnockback
+  # Включить/выключить отбрасывание атакующего при блоке
+  ENABLED = true
+
+  # Сила отбрасывания атакующего (в "пикселях" ABS движения)
+  KNOCKBACK_POWER = 5
+
+  # Заморозка действий атакующего после отскока (в кадрах). 0 - выключить.
+  STUN_FRAMES = 18
+end
+
+module BlockEffectsShared
+  # true - оба эффекта срабатывают только когда блокирует Хелен/союзник
+  # false - работают при блоке любой стороны (включая врагов)
+  ONLY_PLAYER_SIDE = true
+
+  # ID врагов из базы данных (вкладка "Враги"), которые считаются боссами
+  # и должны быть ИСКЛЮЧЕНЫ из обоих эффектов.
+  BOSS_IDS = [8, 14, 16, 17, 18, 19, 20, 22, 23]
+
+  #----------------------------------------------------------------------------
+  # ● boss?
+  #   Проверяет, является ли атакующий персонаж боссом по ID из базы данных.
+  #----------------------------------------------------------------------------
+  def self.boss?(character)
+    return false unless character.is_a?(Map_Enemy)
+    BOSS_IDS.include?(character.battler_id)
+  end
+end
+
+class Map_Battler
+
+  def attack_effect(character, _battler)
+    # стоп-условия без изменений
+    return false if @battler == nil || @blinking != nil && @blinking > 0
+    return false if $DEBUG && @ai.group != 0 && Input.press?(Input::CTRL)
+    dmgchar = (@body == nil ? self : @body)
+
+    # блокирует ли цель прямо сейчас
+    blocking = BlizzABS::Config::FULL_DEFEND && @ai.act.defend?
+
+    # применяются ли наши кастомные эффекты к этому блоку
+    applies = blocking &&
+        (!BlockEffectsShared::ONLY_PLAYER_SIDE || self.is_a?(Map_Actor)) &&
+        character.is_a?(Map_Battler) && character != self &&
+        !BlockEffectsShared.boss?(character)
+
+    # частичный блок применяется только если applies И включена настройка
+    partial = applies && PartialBlock::ENABLED
+
+    # === Обычный (полный) блок - когда частичный блок не применяется ===
+    if blocking && !partial
+      self.attacked = $BlizzABS.pixel
+      $BlizzABS.util.request_damage_sprite(dmgchar, BlizzABS::Cache::TXTDefend)
+      # отбрасывание атакующего работает и при полном блоке, если applies
+      if applies && BlockKnockback::ENABLED
+        character.attacked = BlockKnockback::KNOCKBACK_POWER
+        character.set_action(BlockKnockback::STUN_FRAMES) if BlockKnockback::STUN_FRAMES > 0
+      end
+      return false
+    end
+
+    if @ai.act.defend? && @battler.last_action[0] == "defend"
+      @battler.last_action[1] = true
+    end
+    @battler.current_action.kind = 0
+    # при частичном блоке НЕ передаём флаг guard в стандартную формулу -
+    # снижение урона считаем сами через PartialBlock::DAMAGE_THROUGH
+    @battler.current_action.basic = (@ai.act.defend? && !partial ? 1 : 0)
+
+    @battler.hpdamage, @battler.spdamage = 0, 0
+    result = @battler.attack_effect(_battler)
+
+    # === Частичный блок: срезаем урон ДО того, как он будет показан/применён ===
+    if partial && result
+      full_hp_dmg = @battler.hpdamage
+      if full_hp_dmg > 0
+        reduced = (full_hp_dmg * PartialBlock::DAMAGE_THROUGH).round
+        reduced = 1 if reduced < 1
+        refund = full_hp_dmg - reduced
+        @battler.hp += refund
+        @battler.hpdamage = reduced
+      end
+      full_sp_dmg = @battler.spdamage
+      if full_sp_dmg > 0
+        reduced_sp = (full_sp_dmg * PartialBlock::DAMAGE_THROUGH).round
+        @battler.sp += (full_sp_dmg - reduced_sp)
+        @battler.spdamage = reduced_sp
+      end
+    end
+
+    if result || self.damage_display?
+      action_effect(_battler)
+      if _battler.is_a?(Game_Actor)
+        self.attacked *= BlizzABS::Weapons.knockback(_battler.weapon_id)
+      else
+        self.attacked *= BlizzABS::Enemies.knockback(_battler.id)
+      end
+      # при частичном блоке защищающийся держит щит крепче - меньше отброс
+      self.attacked = (self.attacked * PartialBlock::BLOCK_STAGGER_MULT).round if partial
+      turn_toward(character) if BlizzABS::Config::KNOCKBACK_MODE == 2
+      alignment_effect(character.ai.group) if self.damage_done?
+      $BlizzABS.util.request_damage_sprite(dmgchar)
+      if @battler.hpdamage > 0 || @battler.spdamage > 0
+        @battler.last_hit_by = _battler
+      end
+      @battler.hpdamage, @battler.spdamage = 0, 0
+      result = true
+      @battler.last_attackers.push(_battler)
+      _battler.last_targets.push(@battler)
+      _battler.last_action[1] = true if _battler.last_action[0] == "attack"
+      if _battler.plus_state_set.any? {|s| $data_states[s].slip_damage}
+        @battler.last_slip_attackers.push(_battler)
+      end
+    end
+
+    # отбрасывание атакующего работает и при частичном блоке
+    if partial && BlockKnockback::ENABLED
+      character.attacked = BlockKnockback::KNOCKBACK_POWER
+      character.set_action(BlockKnockback::STUN_FRAMES) if BlockKnockback::STUN_FRAMES > 0
+    end
+
+    $BlizzABS.AI.observe(_battler, @battler.damage) if _battler.is_a?(Game_Actor)
+    @charge = nil if result
+    return result
+  end
+
+end
