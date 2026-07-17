@@ -1,0 +1,684 @@
+#==============================================================================
+# ■ MOG — Анимированный фон (карта + титульный экран)
+#------------------------------------------------------------------------------
+#  Автор оригинала: Moghunter  |  https://mogplugins.com
+#  Переработка: совместимость с Blizz-ABS 2.84, Ruby 1.8.1 / RGSS
+#------------------------------------------------------------------------------
+#  Что умеет:
+#    1. Анимированный титульный экран
+#         Кадры: Graphics/Titles/Title0, Title1, Title2...
+#         Команды: Graphics/Titles/Com_01, Com_02, Com_03
+#    2. Анимированный фон на карте (под слоем тайлов)
+#    3. Анимированный оверлей на карте (поверх событий)
+#
+#  Вызов из события (Script Call, с учётом лимита 37 символов на строку):
+#    add_animated_bg("water",3,20)
+#    add_animated_overlay("rain",2,10)
+#    remove_animated_bg(16)
+#    remove_animated_overlay(16)
+#
+#  Все кадры анимации лежат в Graphics/Titles/
+#  Имена файлов: префикс + номер с нуля (water0, water1, water2…)
+#
+#  ПОРЯДОК В РЕДАКТОРЕ СКРИПТОВ:
+#    Этот скрипт должен стоять ПОСЛЕ всех патчей Blizz-ABS.
+#==============================================================================
+
+#==============================================================================
+# ■ Модуль конфигурации
+#==============================================================================
+module MOG
+
+  # Включить полноэкранный режим при первом запуске (true / false)
+  FULL_SCREEN = false
+
+  # Задержка между кадрами анимации на титульном экране (меньше = быстрее)
+  BACKTITLESPEED = 1
+
+  # Задержка между кадрами анимации на карте (меньше = быстрее)
+  DEFAULT_ANIMATION_SPEED = 1
+
+  # Скорость плавного появления / исчезания на карте (пикселей за кадр)
+  DEFAULT_FADE_SPEED = 16
+
+  # Положение спрайта команд на титульном экране (X, Y)
+  COM_X = 0
+  COM_Y = 0
+
+  # Z-индексы слоёв анимации на карте
+  MAP_BG_Z      = -100  # Под тайлами карты
+  MAP_OVERLAY_Z =  500  # Поверх событий и персонажей
+
+end
+
+#==============================================================================
+# ■ Sprite_AnimatedBackground
+#------------------------------------------------------------------------------
+#  Универсальный спрайт покадровой анимации для использования на карте.
+#  Поддерживает цикличную смену кадров и плавное изменение прозрачности.
+#  Используется только в Scene_Map — для титула своя логика (см. Scene_Title).
+#==============================================================================
+class Sprite_AnimatedBackground < Sprite
+
+  attr_accessor :speed       # Задержка между кадрами в кадрах движка
+  attr_accessor :fade_speed  # Скорость изменения прозрачности за кадр
+  attr_reader   :active      # true — анимация в данный момент активна
+
+  #--------------------------------------------------------------------------
+  # Инициализация. Спрайт создаётся невидимым с нулевой прозрачностью.
+  #--------------------------------------------------------------------------
+  def initialize(viewport = nil)
+    super(viewport)
+    @prefix         = ""
+    @frame          = 0
+    @counter        = 0
+    @speed          = MOG::DEFAULT_ANIMATION_SPEED
+    @fade_speed     = MOG::DEFAULT_FADE_SPEED
+    @active         = false
+    @target_opacity = 0
+    self.opacity    = 0
+    self.visible    = false
+  end
+
+  #--------------------------------------------------------------------------
+  # Запуск анимации.
+  #   prefix  — префикс имён файлов (например "water" → water0, water1…)
+  #   speed   — задержка между кадрами; nil = DEFAULT_ANIMATION_SPEED
+  #   z_index — Z-слой отрисовки; nil = не меняется
+  #   fade    — скорость плавного появления; nil = DEFAULT_FADE_SPEED
+  #--------------------------------------------------------------------------
+  def setup(prefix, speed = nil, z_index = nil, fade = nil)
+    @prefix         = prefix.to_s
+    @speed          = (speed && speed > 0) ? speed : MOG::DEFAULT_ANIMATION_SPEED
+    @fade_speed     = (fade  && fade  > 0) ? fade  : MOG::DEFAULT_FADE_SPEED
+    self.z          = z_index if z_index
+    @frame          = 0
+    @counter        = 0
+    @active         = true
+    @target_opacity = 255
+    self.visible    = true
+    load_frame
+  end
+
+  #--------------------------------------------------------------------------
+  # Обновление за один кадр: прозрачность и смена кадра анимации.
+  #--------------------------------------------------------------------------
+  def update
+    return unless @active
+    update_fade
+    update_animation
+  end
+
+  #--------------------------------------------------------------------------
+  # Запуск плавного исчезания.
+  # После достижения opacity == 0 спрайт деактивируется автоматически.
+  #--------------------------------------------------------------------------
+  def fade_out(speed = nil)
+    @fade_speed     = (speed && speed > 0) ? speed : @fade_speed
+    @target_opacity = 0
+  end
+
+  #--------------------------------------------------------------------------
+  # Освобождение ресурсов спрайта.
+  #--------------------------------------------------------------------------
+  def dispose
+    self.bitmap = nil
+    super
+  end
+
+  #==========================================================================
+  private
+  #==========================================================================
+
+  #--------------------------------------------------------------------------
+  # Шаг прозрачности к целевому значению.
+  # При достижении нуля — деактивация и скрытие спрайта.
+  #--------------------------------------------------------------------------
+  def update_fade
+    if self.opacity < @target_opacity
+      self.opacity += @fade_speed
+      self.opacity  = 255 if self.opacity > 255
+    elsif self.opacity > @target_opacity
+      self.opacity -= @fade_speed
+      if self.opacity <= 0
+        self.opacity = 0
+        self.bitmap  = nil
+        self.visible = false
+        @active      = false
+      end
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Счётчик кадров движка и переключение кадра анимации.
+  #--------------------------------------------------------------------------
+  def update_animation
+    @counter += 1
+    if @counter >= @speed
+      @counter  = 0
+      @frame   += 1
+      load_frame
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Загрузка текущего кадра через RPG::Cache.
+  # Если файл не найден — сброс на кадр 0 (цикл).
+  # Если и кадра 0 нет — деактивация спрайта.
+  #--------------------------------------------------------------------------
+  def load_frame
+    begin
+      self.bitmap = RPG::Cache.title("#{@prefix}#{@frame}")
+    rescue
+      if @frame > 0
+        @frame = 0
+        begin
+          self.bitmap = RPG::Cache.title("#{@prefix}#{@frame}")
+        rescue
+          self.bitmap  = nil
+          self.visible = false
+          @active      = false
+        end
+      else
+        self.bitmap  = nil
+        self.visible = false
+        @active      = false
+      end
+    end
+  end
+
+end
+
+#==============================================================================
+# ■ Scene_Map — расширение для анимированных фонов и оверлеев на карте
+#------------------------------------------------------------------------------
+#  Спрайты создаются внутри main, а не в initialize, чтобы гарантировать
+#  корректную инициализацию вьюпортов Blizz-ABS до создания спрайтов.
+#
+#  Защита unless method_defined? предотвращает двойной алиас при любом
+#  порядке загрузки скриптов.
+#==============================================================================
+class Scene_Map
+
+  #--------------------------------------------------------------------------
+  # Алиас main: создаём спрайты до перехода, чистим строго после выхода.
+  #--------------------------------------------------------------------------
+  unless method_defined?(:mog_abg_map_main)
+    alias mog_abg_map_main main
+  end
+
+  def main
+    @mog_animated_bg      = Sprite_AnimatedBackground.new
+    @mog_animated_bg.z    = MOG::MAP_BG_Z
+
+    @mog_animated_overlay = Sprite_AnimatedBackground.new
+    @mog_animated_overlay.z = MOG::MAP_OVERLAY_Z
+
+    mog_abg_map_main  # основной цикл сцены (включает Graphics.transition и loop)
+
+    # Очистка — гарантированно после выхода из игрового цикла
+    @mog_animated_bg.dispose      if @mog_animated_bg
+    @mog_animated_overlay.dispose if @mog_animated_overlay
+    @mog_animated_bg      = nil
+    @mog_animated_overlay = nil
+  end
+
+  #--------------------------------------------------------------------------
+  # Алиас update: обновляем спрайты каждый кадр.
+  #--------------------------------------------------------------------------
+  unless method_defined?(:mog_abg_map_update)
+    alias mog_abg_map_update update
+  end
+
+  def update
+    mog_abg_map_update
+    @mog_animated_bg.update      if @mog_animated_bg
+    @mog_animated_overlay.update if @mog_animated_overlay
+  end
+
+  #--------------------------------------------------------------------------
+  # Добавить анимированный фон под картой.
+  #   prefix — префикс кадров (например "water" → water0, water1…)
+  #   speed  — задержка между кадрами (nil = по умолчанию)
+  #   fade   — скорость появления    (nil = по умолчанию)
+  #--------------------------------------------------------------------------
+  def add_animated_bg(prefix, speed = nil, fade = nil)
+    return unless @mog_animated_bg
+    @mog_animated_bg.setup(prefix, speed, MOG::MAP_BG_Z, fade)
+  end
+
+  #--------------------------------------------------------------------------
+  # Добавить анимированный оверлей поверх карты.
+  #--------------------------------------------------------------------------
+  def add_animated_overlay(prefix, speed = nil, fade = nil)
+    return unless @mog_animated_overlay
+    @mog_animated_overlay.setup(prefix, speed, MOG::MAP_OVERLAY_Z, fade)
+  end
+
+  #--------------------------------------------------------------------------
+  # Убрать фон с плавным затуханием.
+  #--------------------------------------------------------------------------
+  def remove_animated_bg(fade_speed = nil)
+    return unless @mog_animated_bg && @mog_animated_bg.active
+    @mog_animated_bg.fade_out(fade_speed)
+  end
+
+  #--------------------------------------------------------------------------
+  # Убрать оверлей с плавным затуханием.
+  #--------------------------------------------------------------------------
+  def remove_animated_overlay(fade_speed = nil)
+    return unless @mog_animated_overlay && @mog_animated_overlay.active
+    @mog_animated_overlay.fade_out(fade_speed)
+  end
+
+end
+
+#==============================================================================
+# ■ Interpreter — команды для Script Call из событий карты
+#==============================================================================
+class Interpreter
+
+  # Добавить анимированный фон под картой.
+  def add_animated_bg(prefix, speed = nil, fade = nil)
+    return unless $scene.is_a?(Scene_Map)
+    $scene.add_animated_bg(prefix, speed, fade)
+  end
+
+  # Добавить анимированный оверлей поверх карты.
+  def add_animated_overlay(prefix, speed = nil, fade = nil)
+    return unless $scene.is_a?(Scene_Map)
+    $scene.add_animated_overlay(prefix, speed, fade)
+  end
+
+  # Убрать фон с плавным затуханием.
+  def remove_animated_bg(fade_speed = nil)
+    return unless $scene.is_a?(Scene_Map)
+    $scene.remove_animated_bg(fade_speed)
+  end
+
+  # Убрать оверлей с плавным затуханием.
+  def remove_animated_overlay(fade_speed = nil)
+    return unless $scene.is_a?(Scene_Map)
+    $scene.remove_animated_overlay(fade_speed)
+  end
+
+end
+
+#==============================================================================
+# ■ Scene_Title — титульный экран с анимированным фоном
+#------------------------------------------------------------------------------
+#  Полная замена стандартного Scene_Title RMXP и MOG Animated Title Celia.
+#  Реализует анимированный фон через прямую смену кадров (без Sprite_Animated-
+#  Background — там другая логика fade, на титуле fade не нужен).
+#
+#  Порядок инициализации игровых объектов (критично для Blizz-ABS):
+#    $game_party  = Game_Party.new     — должен быть до Game_Player.new,
+#                                        т.к. Map_Actor#initialize читает
+#                                        $game_party.actors[index]
+#    $game_player = Game_Player.new    — должен быть до setup_starting_members,
+#                                        т.к. init_caterpillar читает $game_player
+#    setup_starting_members            — вызывает init_caterpillar
+#==============================================================================
+class Scene_Title
+
+  # Индексы пунктов меню
+  COMMAND_NEW_GAME = 0
+  COMMAND_CONTINUE = 1
+  COMMAND_SHUTDOWN  = 2
+
+  # Количество слотов сохранения в каждой группе файлов
+  SAVES_PER_SLOT = 4
+
+  #============================================================================
+  # ● Главный метод сцены
+  #============================================================================
+
+  def main
+    # Боевой тест — отдельная ветка без инициализации титула
+    if $BTEST
+      battle_test
+      return
+    end
+
+    setup_fullscreen        # Однократное включение полноэкрана (если нужно)
+    load_game_data          # Загрузка баз данных из Data/*.rxdata
+    $game_system = Game_System.new
+
+    create_command_window   # Невидимое окно для логики курсора
+    create_sprites          # Спрайты фона и команд
+    check_save_files        # Проверка сохранений → настройка курсора
+    start_audio             # BGM титула
+
+    Graphics.transition(6)
+
+    loop do
+      Graphics.update
+      Input.update
+      update
+      break if $scene != self
+    end
+
+    Graphics.freeze
+    dispose_resources
+  end
+
+  #============================================================================
+  # ● Инициализация
+  #============================================================================
+
+  #--------------------------------------------------------------------------
+  # Однократное включение полноэкранного режима через эмуляцию Alt+Enter.
+  # $full_screen инициализируется внизу файла через ||=.
+  #--------------------------------------------------------------------------
+  def setup_fullscreen
+    $full_screen += 1
+    return unless MOG::FULL_SCREEN && $full_screen == 1
+    kb = Win32API.new('user32', 'keybd_event', %w(l l l l), ' ')
+    kb.call(18, 0, 0, 0)
+    kb.call(13, 0, 0, 0)
+    kb.call(13, 0, 2, 0)
+    kb.call(18, 0, 2, 0)
+  end
+
+  #--------------------------------------------------------------------------
+  # Загрузка файлов баз данных.
+  #   prefix : "" для нормальной игры, "BT_" для боевого теста
+  #--------------------------------------------------------------------------
+  def load_game_data(prefix = "")
+    $data_actors        = load_data("Data/#{prefix}Actors.rxdata")
+    $data_classes       = load_data("Data/#{prefix}Classes.rxdata")
+    $data_skills        = load_data("Data/#{prefix}Skills.rxdata")
+    $data_items         = load_data("Data/#{prefix}Items.rxdata")
+    $data_weapons       = load_data("Data/#{prefix}Weapons.rxdata")
+    $data_armors        = load_data("Data/#{prefix}Armors.rxdata")
+    $data_enemies       = load_data("Data/#{prefix}Enemies.rxdata")
+    $data_troops        = load_data("Data/#{prefix}Troops.rxdata")
+    $data_states        = load_data("Data/#{prefix}States.rxdata")
+    $data_animations    = load_data("Data/#{prefix}Animations.rxdata")
+    $data_tilesets      = load_data("Data/#{prefix}Tilesets.rxdata")
+    $data_common_events = load_data("Data/#{prefix}CommonEvents.rxdata")
+    $data_system        = load_data("Data/#{prefix}System.rxdata")
+  end
+
+  #--------------------------------------------------------------------------
+  # Создание окна команд.
+  # Окно скрыто — роль визуального курсора берут на себя спрайты Com_*.
+  #--------------------------------------------------------------------------
+  def create_command_window
+    @command_window = Window_Command.new(192, ["Новая игра", "Продолжить", "Выход"])
+    @command_window.back_opacity = 160
+    @command_window.x = 320 - @command_window.width / 2
+    @command_window.y = 288
+    @command_window.visible = false
+  end
+
+  #--------------------------------------------------------------------------
+  # Создание спрайтов: анимированный фон и изображение команды.
+  #--------------------------------------------------------------------------
+  def create_sprites
+    # Спрайт анимированного фона (Title0, Title1, Title2...)
+    @frmtitle = Sprite.new
+    @frmtitle.z = 0
+    load_background_frame(0)
+
+    # Спрайт изображения текущей команды (Com_01, Com_02, Com_03)
+    @com   = Sprite.new
+    @com.z = 10
+    @com.x = MOG::COM_X
+    @com.y = MOG::COM_Y
+
+    # Переменные анимации фона
+    @backtitleref   = 0   # Текущий номер кадра фона
+    @backtitlespeed = 0   # Счётчик кадров движка до смены кадра
+    @last_cmd_index = -1  # Кэш индекса команды (избегаем лишних загрузок)
+  end
+
+  #--------------------------------------------------------------------------
+  # Загрузка кадра фона по номеру.
+  # RPG::Cache кэширует битмапы — повторная загрузка того же файла
+  # не создаёт новый объект, утечки памяти нет.
+  # Возвращает true при успехе, false если файл не найден.
+  #--------------------------------------------------------------------------
+  def load_background_frame(frame_number)
+    begin
+      @frmtitle.bitmap = RPG::Cache.title("Title#{frame_number}")
+      return true
+    rescue
+      return false
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Загрузка изображения команды по имени файла.
+  #--------------------------------------------------------------------------
+  def load_command_image(image_name)
+    begin
+      @com.bitmap = RPG::Cache.title(image_name)
+    rescue
+      # Файл не найден — оставляем текущее изображение без изменений
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Проверка наличия файлов сохранений, настройка начального пункта меню.
+  # Проверяет оба формата: .rxdata (слот 1) и .rxdata2 (слот 2).
+  #--------------------------------------------------------------------------
+  def check_save_files
+    @continue_enabled = false
+
+    (1..SAVES_PER_SLOT).each do |i|
+      if FileTest.exist?("Save#{i}.rxdata")
+        @continue_enabled = true
+        break
+      end
+    end
+
+    unless @continue_enabled
+      (1..SAVES_PER_SLOT).each do |i|
+        if FileTest.exist?("Save#{i}.rxdata2")
+          @continue_enabled = true
+          break
+        end
+      end
+    end
+
+    if @continue_enabled
+      @command_window.index = COMMAND_CONTINUE
+    else
+      @command_window.index = COMMAND_NEW_GAME
+      @command_window.disable_item(COMMAND_CONTINUE)
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Запуск аудио титульного экрана.
+  #--------------------------------------------------------------------------
+  def start_audio
+    $game_system.bgm_play($data_system.title_bgm)
+    Audio.me_stop
+    Audio.bgs_stop
+  end
+
+  #============================================================================
+  # ● Обновление сцены
+  #============================================================================
+
+  #--------------------------------------------------------------------------
+  # Обновление всех компонентов за один кадр.
+  #--------------------------------------------------------------------------
+  def update
+    @command_window.update
+    update_background_animation
+    update_command_image
+    process_input
+  end
+
+  #--------------------------------------------------------------------------
+  # Анимация фона: счётчик кадров → смена изображения.
+  # При отсутствии следующего кадра — сброс на Title0.
+  #--------------------------------------------------------------------------
+  def update_background_animation
+    @backtitlespeed += 1
+    return if @backtitlespeed <= MOG::BACKTITLESPEED
+
+    @backtitlespeed = 0
+    @backtitleref  += 1
+
+    unless load_background_frame(@backtitleref)
+      @backtitleref = 0
+      load_background_frame(@backtitleref)
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Смена изображения команды только при изменении индекса курсора.
+  # Кэш @last_cmd_index исключает лишние обращения к RPG::Cache каждый кадр.
+  #--------------------------------------------------------------------------
+  def update_command_image
+    idx = @command_window.index
+    return if idx == @last_cmd_index
+
+    @last_cmd_index = idx
+    case idx
+    when COMMAND_NEW_GAME then load_command_image("Com_01")
+    when COMMAND_CONTINUE then load_command_image("Com_02")
+    when COMMAND_SHUTDOWN  then load_command_image("Com_03")
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # Обработка ввода игрока.
+  #--------------------------------------------------------------------------
+  def process_input
+    return unless Input.trigger?(Input::C)
+    case @command_window.index
+    when COMMAND_NEW_GAME then command_new_game
+    when COMMAND_CONTINUE then command_continue
+    when COMMAND_SHUTDOWN  then command_shutdown
+    end
+  end
+
+  #============================================================================
+  # ● Команды меню
+  #============================================================================
+
+  #--------------------------------------------------------------------------
+  # Новая игра.
+  #
+  # Порядок создания объектов критичен для Blizz-ABS:
+  #   1. $game_party  = Game_Party.new
+  #        Game_Party создаёт пустой список актёров (@actors = []).
+  #        Map_Actor#initialize читает $game_party.actors[index] — если
+  #        $game_party == nil, будет NoMethodError. Поэтому party — первым.
+  #
+  #   2. $game_player = Game_Player.new
+  #        Game_Player наследует Map_Actor. Map_Actor#initialize получает
+  #        $game_party.actors[0] == nil (партия пустая) → @battler = nil.
+  #        Это нормально: игрок существует, но !valid? до setup_starting_members.
+  #
+  #   3. $game_party.setup_starting_members
+  #        Blizz-ABS перехватывает этот метод и вызывает init_caterpillar,
+  #        который читает $game_player (@actors = [$game_player]) и вызывает
+  #        $game_player.refresh. Оба объекта к этому моменту уже существуют.
+  #--------------------------------------------------------------------------
+  def command_new_game
+    $game_system.se_play($data_system.decision_se)
+    Audio.bgm_stop
+    Graphics.frame_count    = 0
+    $game_temp              = Game_Temp.new
+    $game_system            = Game_System.new
+    $game_switches          = Game_Switches.new
+    $game_variables         = Game_Variables.new
+    $game_self_switches     = Game_SelfSwitches.new
+    $game_screen            = Game_Screen.new
+    $game_actors            = Game_Actors.new
+    $game_troop             = Game_Troop.new
+    $game_map               = Game_Map.new
+    $game_party             = Game_Party.new
+    $game_player            = Game_Player.new
+    $game_party.setup_starting_members
+    $game_map.setup($data_system.start_map_id)
+    $game_player.moveto($data_system.start_x, $data_system.start_y)
+    $game_player.refresh
+    $game_map.autoplay
+    $game_map.update
+    $scene = Scene_Map.new
+  end
+
+  #--------------------------------------------------------------------------
+  # Продолжить игру — переход к выбору файла сохранения.
+  #--------------------------------------------------------------------------
+  def command_continue
+    unless @continue_enabled
+      $game_system.se_play($data_system.buzzer_se)
+      return
+    end
+    $game_system.se_play($data_system.decision_se)
+    $scene = Scene_S1L.new(true)
+  end
+
+  #--------------------------------------------------------------------------
+  # Выход из игры.
+  #--------------------------------------------------------------------------
+  def command_shutdown
+    $game_system.se_play($data_system.decision_se)
+    Audio.bgm_fade(800)
+    Audio.bgs_fade(800)
+    Audio.me_fade(800)
+    $scene = nil
+  end
+
+  #============================================================================
+  # ● Боевой тест
+  #============================================================================
+
+  #--------------------------------------------------------------------------
+  # Запуск тестового боя из редактора (F12 / $BTEST).
+  # Порядок party → player → setup_battle_test_members — тот же, что выше.
+  #--------------------------------------------------------------------------
+  def battle_test
+    load_game_data("BT_")
+    Graphics.frame_count         = 0
+    $game_temp                   = Game_Temp.new
+    $game_system                 = Game_System.new
+    $game_switches               = Game_Switches.new
+    $game_variables              = Game_Variables.new
+    $game_self_switches          = Game_SelfSwitches.new
+    $game_screen                 = Game_Screen.new
+    $game_actors                 = Game_Actors.new
+    $game_troop                  = Game_Troop.new
+    $game_map                    = Game_Map.new
+    $game_party                  = Game_Party.new
+    $game_player                 = Game_Player.new
+    $game_party.setup_battle_test_members
+    $game_temp.battle_troop_id   = $data_system.test_troop_id
+    $game_temp.battle_can_escape = true
+    $game_map.battleback_name    = $data_system.battleback_name
+    $game_system.se_play($data_system.battle_start_se)
+    $game_system.bgm_play($game_system.battle_bgm)
+    $scene = Scene_Battle.new
+  end
+
+  #============================================================================
+  # ● Завершение сцены
+  #============================================================================
+
+  #--------------------------------------------------------------------------
+  # Освобождение ресурсов.
+  # Битмапы из RPG::Cache не требуют ручного dispose — кэш управляет ими сам.
+  # Dispose нужен только для самих спрайтов (RGSS-объекты).
+  #--------------------------------------------------------------------------
+  def dispose_resources
+    @command_window.dispose if @command_window
+    @frmtitle.dispose       if @frmtitle && !@frmtitle.disposed?
+    @com.dispose            if @com && !@com.disposed?
+  end
+
+end
+
+#==============================================================================
+# Счётчик запусков для однократного включения полноэкранного режима.
+# ||= гарантирует что существующее значение не будет перезаписано
+# при повторном include этого файла.
+#==============================================================================
+$full_screen ||= 0
