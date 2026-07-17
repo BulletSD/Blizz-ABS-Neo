@@ -1,0 +1,490 @@
+#==============================================================================
+# ■ Scene_Gameover
+#------------------------------------------------------------------------------
+#  Этот класс реализует сцену "Конец Игры" (Game Over).
+#  Предоставляет игроку расширенные возможности:
+#  быстрый рестарт с последнего сохранения, переход к загрузке или в меню.
+#  
+#  Поддерживает систему из 8 слотов сохранения:
+#  - Слот 1: файлы Save1.rxdata - Save4.rxdata
+#  - Слот 2: файлы Save1.rxdata2 - Save4.rxdata2
+#==============================================================================
+
+class Scene_Gameover
+  #==========================================================================
+  # ● КОНСТАНТЫ И НАСТРОЙКИ
+  #==========================================================================
+  
+  # Команды меню Game Over
+  COMMAND_RESTART = 0  # Быстрый рестарт
+  COMMAND_LOAD    = 1  # Загрузить игру
+  COMMAND_TITLE   = 2  # В титульное меню
+  
+  # Настройки интерфейса
+  COMMAND_WINDOW_WIDTH = 192
+  COMMAND_WINDOW_Y     = 370
+  BACKGROUND_OPACITY   = 200
+  
+  # Время переходов (в кадрах)
+  TRANSITION_SPEED_FAST = 40
+  TRANSITION_SPEED_NORM = 75
+  TRANSITION_SPEED_SLOW = 120
+  
+  # Количество файлов в каждом слоте
+  SAVES_PER_SLOT = 4
+  
+  #==========================================================================
+  # ● ОСНОВНОЙ ЦИКЛ СЦЕНЫ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Главный метод сцены
+  #--------------------------------------------------------------------------
+  def main
+    setup_gameover_graphics
+    stop_all_audio
+    
+    # Небольшая пауза перед воспроизведением музыки Game Over
+    Graphics.transition(TRANSITION_SPEED_NORM)
+    Graphics.freeze
+    
+    play_gameover_music
+    
+    create_command_window
+    check_load_availability
+    check_restart_availability
+    
+    Graphics.transition(TRANSITION_SPEED_SLOW)
+    
+    run_scene_loop
+    
+    dispose_resources
+    perform_exit_transition
+  end
+  
+  #==========================================================================
+  # ● ИНИЦИАЛИЗАЦИЯ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Настройка графики Game Over
+  #--------------------------------------------------------------------------
+  def setup_gameover_graphics
+    @sprite = Sprite.new
+    @sprite.bitmap = RPG::Cache.gameover($data_system.gameover_name)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Полная остановка всего аудио
+  #--------------------------------------------------------------------------
+  def stop_all_audio
+    # Останавливаем все типы аудио
+    Audio.bgm_stop
+    Audio.bgs_stop
+    Audio.me_stop
+    Audio.se_stop
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Воспроизведение мелодии Game Over
+  #--------------------------------------------------------------------------
+  def play_gameover_music
+    $game_system.me_play($data_system.gameover_me)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Создание окна команд
+  #--------------------------------------------------------------------------
+  def create_command_window
+    commands = []
+    commands.push("Быстрый рестарт")
+    commands.push("Загрузить игру")
+    commands.push("В титульное меню")
+    
+    @command_window = Window_Command.new(COMMAND_WINDOW_WIDTH, commands)
+    @command_window.back_opacity = BACKGROUND_OPACITY
+    @command_window.x = 320 - @command_window.width / 2
+    @command_window.y = COMMAND_WINDOW_Y - @command_window.height / 2
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка доступности загрузки (оба слота)
+  #--------------------------------------------------------------------------
+  def check_load_availability
+    @continue_enabled = false
+    
+    # Проверка файлов Слота 1 (.rxdata)
+    for i in 1..SAVES_PER_SLOT
+      if FileTest.exist?("Save#{i}.rxdata")
+        @continue_enabled = true
+        break
+      end
+    end
+    
+    # Проверка файлов Слота 2 (.rxdata2), если в первом слоте нет сохранений
+    if !@continue_enabled
+      for i in 1..SAVES_PER_SLOT
+        if FileTest.exist?("Save#{i}.rxdata2")
+          @continue_enabled = true
+          break
+        end
+      end
+    end
+    
+    # Настройка доступности пункта меню
+    if @continue_enabled
+      @command_window.index = COMMAND_LOAD
+    else
+      @command_window.disable_item(COMMAND_LOAD)
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Проверка доступности быстрого рестарта
+  #--------------------------------------------------------------------------
+  def check_restart_availability
+    @restart_enabled = false
+    
+    # Проверка наличия данных о последнем сохранении
+    if $game_system == nil
+      @restart_enabled = false
+    elsif $game_system.last_save_slot == nil || $game_system.last_save_index == nil
+      @restart_enabled = false
+    elsif $game_system.last_save_slot < 1 || $game_system.last_save_slot > 2
+      @restart_enabled = false
+    elsif $game_system.last_save_index < 1 || $game_system.last_save_index > SAVES_PER_SLOT
+      @restart_enabled = false
+    else
+      # Проверяем существование файла последнего сохранения
+      filename = get_last_save_filename
+      if filename != nil && FileTest.exist?(filename)
+        @restart_enabled = true
+      end
+    end
+    
+    # Настройка доступности пункта меню
+    if !@restart_enabled
+      @command_window.disable_item(COMMAND_RESTART)
+      # Если и загрузка недоступна, выбираем "В титульное меню"
+      if !@continue_enabled
+        @command_window.index = COMMAND_TITLE
+      end
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Получение имени файла последнего сохранения
+  #--------------------------------------------------------------------------
+  def get_last_save_filename
+    if $game_system == nil
+      return nil
+    end
+    if $game_system.last_save_slot == nil || $game_system.last_save_index == nil
+      return nil
+    end
+    
+    case $game_system.last_save_slot
+    when 1
+      return "Save#{$game_system.last_save_index}.rxdata"
+    when 2
+      return "Save#{$game_system.last_save_index}.rxdata2"
+    end
+    
+    return nil
+  end
+  
+  #==========================================================================
+  # ● ГЛАВНЫЙ ЦИКЛ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Запуск главного цикла сцены
+  #--------------------------------------------------------------------------
+  def run_scene_loop
+    loop do
+      Graphics.update
+      Input.update
+      update
+      break if $scene != self
+    end
+    Graphics.freeze
+  end
+  
+  #==========================================================================
+  # ● ОБНОВЛЕНИЕ СЦЕНЫ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Обновление кадра
+  #--------------------------------------------------------------------------
+  def update
+    @command_window.update
+    
+    if Input.trigger?(Input::B)
+      process_cancel
+      return
+    end
+    
+    if Input.trigger?(Input::C)
+      process_command
+      return
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обработка отмены (B)
+  #--------------------------------------------------------------------------
+  def process_cancel
+    $game_system.se_play($data_system.buzzer_se)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Обработка выбора команды (C)
+  #--------------------------------------------------------------------------
+  def process_command
+    case @command_window.index
+    when COMMAND_RESTART
+      command_quick_restart
+    when COMMAND_LOAD
+      command_load_game
+    when COMMAND_TITLE
+      command_to_title
+    end
+  end
+  
+  #==========================================================================
+  # ● КОМАНДЫ МЕНЮ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Быстрый рестарт
+  #--------------------------------------------------------------------------
+  def command_quick_restart
+    if !@restart_enabled
+      $game_system.se_play($data_system.buzzer_se)
+      return
+    end
+    
+    filename = get_last_save_filename
+    if filename == nil || !FileTest.exist?(filename)
+      $game_system.se_play($data_system.buzzer_se)
+      return
+    end
+    
+    $game_system.se_play($data_system.decision_se)
+    
+    # Полная остановка музыки Game Over перед загрузкой
+    stop_all_audio
+    
+    # Загрузка данных из файла
+    file = File.open(filename, "rb")
+    read_save_data(file)
+    file.close
+    
+    # Восстановление музыки из сохранения
+    restore_audio_from_save
+    
+    $game_map.update
+    $scene = Scene_Map.new
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Загрузка игры (переход к выбору слота)
+  #--------------------------------------------------------------------------
+  def command_load_game
+    if !@continue_enabled
+      $game_system.se_play($data_system.buzzer_se)
+      return
+    end
+    
+    $game_system.se_play($data_system.decision_se)
+    
+    # Полная остановка музыки Game Over перед переходом
+    stop_all_audio
+    
+    # Переход к выбору слота (false = мы не с титульного экрана)
+    $scene = Scene_S1L.new(false)
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Возврат к титульному экрану
+  #--------------------------------------------------------------------------
+  def command_to_title
+    $game_system.se_play($data_system.decision_se)
+    
+    # Полная остановка музыки Game Over
+    stop_all_audio
+    
+    $scene = Scene_Title.new
+  end
+  
+  #==========================================================================
+  # ● ЗАГРУЗКА ДАННЫХ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Чтение данных сохранения из файла
+  #--------------------------------------------------------------------------
+  def read_save_data(file)
+    characters = Marshal.load(file)
+    Graphics.frame_count = Marshal.load(file)
+    $game_system        = Marshal.load(file)
+    $game_switches      = Marshal.load(file)
+    $game_variables     = Marshal.load(file)
+    $game_self_switches = Marshal.load(file)
+    $game_screen        = Marshal.load(file)
+    $game_actors        = Marshal.load(file)
+    $game_party         = Marshal.load(file)
+    $game_troop         = Marshal.load(file)
+    $game_map           = Marshal.load(file)
+    $game_player        = Marshal.load(file)
+    
+    # Коррекция при обновлении данных карты в редакторе
+    if $game_system.magic_number != $data_system.magic_number
+      $game_map.setup($game_map.map_id)
+      $game_player.center($game_player.x, $game_player.y)
+    end
+    
+    $game_party.refresh
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Восстановление аудио из сохранения
+  #--------------------------------------------------------------------------
+  def restore_audio_from_save
+    # Воспроизведение BGM из сохранения
+    if $game_system.playing_bgm != nil
+      $game_system.bgm_play($game_system.playing_bgm)
+    end
+    
+    # Воспроизведение BGS из сохранения
+    if $game_system.playing_bgs != nil
+      $game_system.bgs_play($game_system.playing_bgs)
+    end
+  end
+  
+  #==========================================================================
+  # ● ЗАВЕРШЕНИЕ СЦЕНЫ
+  #==========================================================================
+  
+  #--------------------------------------------------------------------------
+  # ● Освобождение ресурсов
+  #--------------------------------------------------------------------------
+  def dispose_resources
+    if @sprite != nil
+      if @sprite.bitmap != nil
+        @sprite.bitmap.dispose
+      end
+      @sprite.dispose
+    end
+    
+    if @command_window != nil
+      @command_window.dispose
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # ● Финальный переход
+  #--------------------------------------------------------------------------
+  def perform_exit_transition
+    Graphics.transition(TRANSITION_SPEED_FAST)
+  end
+end
+
+#==============================================================================
+# ■ Game_System
+#------------------------------------------------------------------------------
+#  Расширение класса для хранения информации о последнем сохранении.
+#  Поддерживает систему из двух слотов (8 файлов).
+#==============================================================================
+class Game_System
+  #--------------------------------------------------------------------------
+  # ● Публичные атрибуты
+  #--------------------------------------------------------------------------
+  attr_accessor :last_save_slot   # Номер слота (1 или 2)
+  attr_accessor :last_save_index  # Номер файла в слоте (1-4)
+  
+  #--------------------------------------------------------------------------
+  # ● Алиас инициализации
+  #--------------------------------------------------------------------------
+  alias gameover_quick_restart_initialize initialize
+  def initialize
+    gameover_quick_restart_initialize
+    @last_save_slot = nil
+    @last_save_index = nil
+  end
+end
+
+#==============================================================================
+# ■ Scene_Save
+#------------------------------------------------------------------------------
+#  Расширение для записи информации о последнем сохранении (Слот 1).
+#==============================================================================
+class Scene_Save
+  #--------------------------------------------------------------------------
+  # ● Алиас on_decision для Слота 1
+  #--------------------------------------------------------------------------
+  alias gameover_quick_restart_save_decision on_decision
+  def on_decision(filename)
+    # Запоминаем: Слот 1, номер файла (1-4)
+    $game_system.last_save_slot = 1
+    $game_system.last_save_index = @file_index + 1
+    gameover_quick_restart_save_decision(filename)
+  end
+end
+
+#==============================================================================
+# ■ Scene_Save2
+#------------------------------------------------------------------------------
+#  Расширение для записи информации о последнем сохранении (Слот 2).
+#==============================================================================
+class Scene_Save2
+  #--------------------------------------------------------------------------
+  # ● Алиас on_decision для Слота 2
+  #--------------------------------------------------------------------------
+  alias gameover_quick_restart_save2_decision on_decision
+  def on_decision(filename)
+    # Запоминаем: Слот 2, номер файла (1-4)
+    $game_system.last_save_slot = 2
+    $game_system.last_save_index = @file_index + 1
+    gameover_quick_restart_save2_decision(filename)
+  end
+end
+
+#==============================================================================
+# ■ Scene_Load
+#------------------------------------------------------------------------------
+#  Расширение для остановки музыки Game Over при загрузке (Слот 1).
+#==============================================================================
+class Scene_Load
+  #--------------------------------------------------------------------------
+  # ● Алиас on_decision для остановки музыки
+  #--------------------------------------------------------------------------
+  alias gameover_audio_fix_load_decision on_decision
+  def on_decision(filename)
+    # Останавливаем всю музыку перед загрузкой
+    Audio.bgm_stop
+    Audio.bgs_stop
+    Audio.me_stop
+    gameover_audio_fix_load_decision(filename)
+  end
+end
+
+#==============================================================================
+# ■ Scene_Load2
+#------------------------------------------------------------------------------
+#  Расширение для остановки музыки Game Over при загрузке (Слот 2).
+#==============================================================================
+class Scene_Load2
+  #--------------------------------------------------------------------------
+  # ● Алиас on_decision для остановки музыки
+  #--------------------------------------------------------------------------
+  alias gameover_audio_fix_load2_decision on_decision
+  def on_decision(filename)
+    # Останавливаем всю музыку перед загрузкой
+    Audio.bgm_stop
+    Audio.bgs_stop
+    Audio.me_stop
+    gameover_audio_fix_load2_decision(filename)
+  end
+end
